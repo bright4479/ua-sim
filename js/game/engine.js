@@ -253,6 +253,11 @@ const Engine = (() => {
         if (act.type === 'play') await playCard(p, act);
         else if (act.type === 'raid') await raidCard(p, act);
         else if (act.type === 'event') await playEvent(p, act);
+        else if (act.type === 'ability') {
+          const u = findUnit(p, act.uid);
+          const h = u && Effects.registry[u.no]?.onMain;
+          if (h) await h(G, p, u);
+        }
         else if (act.type === 'bpmod') { // manual effect application
           const u = findUnit(p, act.uid) || findUnit(opponentOf(p), act.uid);
           if (u) { u.bpMod += act.delta; log(`${p.name} ปรับ BP ${u.card.name} ${act.delta > 0 ? '+' : ''}${act.delta}`); }

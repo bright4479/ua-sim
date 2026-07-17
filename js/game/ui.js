@@ -494,7 +494,10 @@ const GameUI = (() => {
     }
 
     if (pendingKind === 'main') {
-      const opts = [
+      const opts = [];
+      if (Effects.registry[u.no]?.onMain)
+        opts.push({ label: '⚡ ใช้ Ability [Main]', value: 'ability' });
+      opts.push(
         { label: '🔍 ดูการ์ด', value: 'view' },
         { label: '＋1000 BP', value: '+bp' },
         { label: '−1000 BP', value: '-bp' },
@@ -502,9 +505,10 @@ const GameUI = (() => {
         { label: '🗑 ส่งไป Sideline', value: 'side' },
         { label: '❌ ส่งไป Removal', value: 'rmv' },
         { label: 'ยกเลิก', value: null },
-      ];
+      );
       const v = await modalChoice(`${u.card.name} — จัดการ (manual)`, cardThumb(u.card), opts);
       if (!v) return;
+      if (v === 'ability') { resolve({ type: 'ability', uid }); return; }
       if (v === 'view') { showCardModal(u.no); return; }
       if (v === '+bp') resolve({ type: 'bpmod', uid, delta: 1000 });
       else if (v === '-bp') resolve({ type: 'bpmod', uid, delta: -1000 });
