@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>UA SIM — Union Arena Simulator</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ═══════════ MAIN MENU ═══════════ -->
+<div id="screen-menu" class="screen active">
+  <div class="menu-box">
+    <h1 class="logo">UNION ARENA<span>SIMULATOR</span></h1>
+    <div class="menu-buttons">
+      <button class="menu-btn" onclick="App.startSinglePlayer()">⚔️ Single Player</button>
+      <button class="menu-btn" onclick="App.startCoop()">🤝 Co-Op</button>
+      <button class="menu-btn" onclick="App.show('deckbuilder')">🃏 Deck Builder</button>
+    </div>
+    <p class="menu-note">การ์ด <b id="menu-card-count">…</b> ใบ จาก <b id="menu-series-count">…</b> series · Fan-made simulator (ข้อมูลการ์ด © BANDAI)</p>
+  </div>
+</div>
+
+<!-- ═══════════ DECK BUILDER ═══════════ -->
+<div id="screen-deckbuilder" class="screen">
+  <header class="topbar">
+    <button class="btn back" onclick="App.show('menu')">← เมนู</button>
+    <h2>Deck Builder</h2>
+    <div class="topbar-right">
+      <select id="db-deck-select" title="เด็คที่บันทึกไว้"></select>
+      <button class="btn" id="db-new">✚ ใหม่</button>
+      <button class="btn primary" id="db-save">💾 SAVE</button>
+      <button class="btn danger" id="db-delete">🗑</button>
+    </div>
+  </header>
+
+  <div class="db-body">
+    <!-- filters + card pool -->
+    <section class="db-pool">
+      <div class="db-filters">
+        <select id="f-series"></select>
+        <select id="f-color">
+          <option value="">สีทั้งหมด</option>
+          <option>Yellow</option><option>Purple</option><option>Red</option>
+          <option>Blue</option><option>Green</option>
+        </select>
+        <select id="f-type">
+          <option value="">Type ทั้งหมด</option>
+          <option>Character</option><option>Event</option><option>Field</option><option>AP</option>
+        </select>
+        <select id="f-rarity"></select>
+        <select id="f-trigger">
+          <option value="">Trigger ทั้งหมด</option>
+          <option>Draw</option><option>Get</option><option>Active</option><option>Raid</option>
+          <option>Color</option><option>Special</option><option>Final</option>
+        </select>
+        <input type="search" id="f-search" placeholder="🔍 ชื่อ / effect / card no.">
+        <span id="f-count" class="f-count"></span>
+      </div>
+      <div id="db-cards" class="card-grid"></div>
+    </section>
+
+    <!-- current deck -->
+    <aside class="db-deck">
+      <div class="deck-head">
+        <input id="db-deck-name" placeholder="ชื่อเด็ค…" maxlength="40">
+        <div class="deck-count"><b id="db-count">0</b>/50</div>
+      </div>
+      <div id="db-deck-warnings" class="deck-warnings"></div>
+      <div id="db-decklist" class="deck-list"></div>
+    </aside>
+  </div>
+</div>
+
+<!-- ═══════════ GAME BOARD ═══════════ -->
+<div id="screen-game" class="screen">
+  <div id="game-root"></div>
+</div>
+
+<!-- card detail modal (shared) -->
+<div id="card-modal" class="modal hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="modal-card">
+    <img id="cm-img" alt="">
+    <div class="modal-info" id="cm-info"></div>
+  </div>
+</div>
+
+<div id="rotate-hint">📱 กรุณาหมุนจอเป็นแนวนอน</div>
+
+<script src="data/cards.js"></script>
+<script src="js/data.js"></script>
+<script src="js/deckbuilder.js"></script>
+<script src="js/game/engine.js"></script>
+<script src="js/game/bot.js"></script>
+<script src="js/game/ui.js"></script>
+<script src="js/effects/mcr.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

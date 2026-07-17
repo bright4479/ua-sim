@@ -1,0 +1,1417 @@
+{
+  "_maintenanceCode": "holst123",
+  "maintenanceMessage": "ExBurst.DEV is leveling up to version 3! The site will be back online shortly. Thank you for your patience!",
+  "_adminWarning": "<strong>Welcome to V3!</strong> Find all details <a href=\"https://exburst.dev/ua/articles/version-3-new-features-and-changelog-fckeg1\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px;\">here</a>. If any issue please contact me on Discord!",
+  "card_config_version": 7,
+  "archetype_version": 7,
+  "gameid": "ua",
+  "gameid_truepath": "ua",
+  "gamename": "Union Arena (Asia)",
+  "decklists_table": "decklists",
+  "mainThemeColor": "#ff3737",
+  "homeImage": "https://exburst.dev/ua/csm_release.webp",
+  "pageTitle": "",
+  "homeLink": "/",
+  "webTitle": "Union Arena Card List and Deck Builder by ExBurst.DEV",
+  "copyrightHolder": "BANDAI and their affiliated parties",
+  "startUrl": "https://exburst.dev",
+  "cardFront_column": "imageLink",
+  "cardBack": false,
+  "cardBack_column": "",
+  "cardName_column": "name",
+  "cardId_column": "cardNo",
+  "cardColor_column": "color",
+  "cardCost_column": "energyCost",
+  "cardTraits_column": "traits",
+  "cardTraits_delimiter": [
+    "/",
+    "|"
+  ],
+  "homeConfig": {
+    "gameBackground": "https://exburst.dev/ua/csm_release.webp"
+  },
+  "alternate_matching_column": "originalId",
+  "cardEffect_column": "effect",
+  "cardPower_column": "power",
+  "cardOriginalId_column": "originalId",
+  "formatedCardNo_column": "cardNo",
+  "cardType_column": "type",
+  "customTranslated": true,
+  "translations": {
+    "enabled": true,
+    "defaultLanguage": "en",
+    "fallbackLanguage": "en",
+    "languagePrompt": false,
+    "applyTranslationsToCards": false,
+    "cardInfoImageOnly": true,
+    "allowTranslatedImageUploads": true,
+    "allowOverlayToggle": true,
+    "specialRenderer": "ua-legacy",
+    "translationCardIdColumn": "cardNo",
+    "imageColumn": "imageLink",
+    "translatableColumns": [
+      "name",
+      "effect",
+      "_triggerText",
+      "traits"
+    ],
+    "overlayColumns": [
+      "name",
+      "effect",
+      "_triggerText"
+    ],
+    "multiLanguageDisplayColumns": [
+      "name",
+      "effect",
+      "_triggerText"
+    ],
+    "languages": [
+      {
+        "code": "en",
+        "label": "English",
+        "flag": "EN"
+      },
+      {
+        "code": "ja",
+        "label": "Japanese",
+        "flag": "JP"
+      }
+    ],
+    "renderers": {
+      "titleColumn": "name",
+      "bodyColumns": [
+        "effect",
+        "_triggerText"
+      ],
+      "titleBox": {
+        "x": 24,
+        "y": 24,
+        "width": 552,
+        "height": 72,
+        "fontSize": 28
+      },
+      "bodyBox": {
+        "x": 28,
+        "y": 512,
+        "width": 544,
+        "height": 286,
+        "fontSize": 22,
+        "lineHeight": 28
+      }
+    }
+  },
+  "removeTextEffectFirstNumber": true,
+  "maximumUniqueCardPerDeck": 4,
+  "maximumCardsPerDeck": 50,
+  "startingHandCount": 7,
+  "cardsPerTurn": 1,
+  "seriesLoadedAtStart": [
+    "none"
+  ],
+  "minimumCachingColumns": [
+    "name",
+    "color",
+    "traits",
+    "effect",
+    "power",
+    "originalId",
+    "cardNo",
+    "rarity",
+    "imageLink",
+    "mainalternate",
+    "created_at",
+    "updated_at",
+    "apCost",
+    "generatedEnergyData",
+    "energyCost",
+    "_trigger",
+    "_triggerText",
+    "type",
+    "series",
+    "raritytype"
+  ],
+  "series_column": "series",
+  "extraSetFilter": true,
+  "pickAndSelectSeries": true,
+  "hasLeader": false,
+  "wildcardSeries": "ua",
+  "setExtractPattern": "-(\\d+)-",
+  "shinyRarities": [
+    "☆",
+    "☆☆",
+    "☆☆☆"
+  ],
+  "upgradeListColumn": "raritytype",
+  "upgradeListRules": [
+    "☆☆☆",
+    "☆☆",
+    "☆",
+    null
+  ],
+  "gameColors": [
+    {
+      "name": "Yellow",
+      "value": "yellow",
+      "code": "#FFFF00",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_yellow1.png"
+    },
+    {
+      "name": "Purple",
+      "value": "purple",
+      "code": "#800080",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_purple1.png"
+    },
+    {
+      "name": "Red",
+      "value": "red",
+      "code": "#FF0000",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_red1.png"
+    },
+    {
+      "name": "Blue",
+      "value": "blue",
+      "code": "#0000FF",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_blue1.png"
+    },
+    {
+      "name": "Green",
+      "value": "green",
+      "code": "#008000",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_green1.png"
+    },
+    {
+      "name": "Rainbow",
+      "value": "rainbow",
+      "code": "#000000",
+      "icon": "https://exburst.dev/icon/ua/ico_resource_energy_rainbow1.png"
+    }
+  ],
+  "series": {
+      "MCR-": {
+        "name": "Macross",
+        "logo": "https://exburst.dev/icon/logo_mcr.png",
+        "favoriteCard": "https://exburst.dev/ua/cards/sd/UA36BT_MCR-1-082.webp",
+        "released": true,
+        "isNew":true
+      },
+      "MST-": {
+        "name": "Mushoku Tensei",
+        "logo": "",
+        "favoriteCard": "",
+        "released": true,
+        "isNew":true
+      },
+    "IYS-": {
+      "name": "Inuyasha",
+      "logo": "",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA50BT_IYS-1-046.webp",
+      "released": true
+    },
+    "CSM-": {
+      "name": "Chainsaw Man",
+      "logo": "",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA53BT_CSM-1-048.webp",
+      "released": true
+    },
+    "KJN-": {
+      "name": "The Eminence in Shadow",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA52BT_KJN-1-016.webp",
+      "logo": "",
+      "released": true
+    },
+    "SLG-": {
+      "name": "Solo Leveling",
+      "logo": "",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA51BT_SLG-1-048.webp",
+      "released": true
+    },
+    "GIM-": {
+      "name": "Gakuen Idol Master",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA27BT_GIM-1-068.webp",
+      "logo": "https://exburst.dev/icon/logo_gim.png",
+      "released": true
+    },
+    "MSS-": {
+      "name": "Mato Seihei no Slave (Chained Soldier)",
+      "logo": "https://exburst.dev/icon/logo_mss.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA49BT_MSS-1-021.webp",
+      "released": true
+    },
+    "NIK-": {
+      "name": "NIKKE",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/NIK-1-018.webp",
+      "logo": "https://exburst.dev/icon/logo_nik.png",
+      "released": true
+    },
+    "KGD-": {
+      "name": "Kingdom",
+      "logo": "",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA48BT_KGD-1-055.webp",
+      "released": true
+    },
+    "IMS-": {
+      "name": "Shiny Colors",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/EX03BT_IMS-2-046_p2.webp",
+      "logo": "https://exburst.dev/icon/logo_ims.png",
+      "released": true
+    },
+    "KGR-": {
+      "name": "Kagurabachi",
+      "logo": "https://exburst.dev/icon/ua/logo_kgr.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/UA46BT_KGR-1-060.webp",
+      "released": true
+    },
+    "TKG-": {
+      "name": "Tokyo Ghoul",
+      "logo": "https://exburst.dev/icon/ua/logo_tkg.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/UA47BT_TKG-1-071.webp",
+      "released": true
+    },
+    "TLR-": {
+      "name": "To Love Ru",
+      "logo": "https://exburst.dev/icon/logo_tlr.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/UA45BT_TLR-1-028.webp",
+      "released": true
+    },
+    "EVA-": {
+      "name": "Evangelion",
+      "logo": "https://exburst.dev/icon/logo_eva.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA44BT_EVA-1-079.webp",
+      "released": true
+    },
+    "KMR-": {
+      "name": "Kamen Rider",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA29BT_KMR-1-021.webp",
+      "logo": "https://exburst.dev/icon/logo_kmr.png"
+    },
+    "SMD-": {
+      "name": "Sakamoto Days",
+      "logo": "https://exburst.dev/icon/logo_smd.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA43BT_SMD-1-026.webp",
+      "released": true
+    },
+    "MGS-": {
+      "name": "Monogatari Series",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA42BT_MGS-1-083.webp",
+      "logo": "https://exburst.dev/icon/logo_mgs.png",
+      "released": true
+    },
+    "RNK-": {
+      "name": "Rurouni Kenshin",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA41BT_RNK-1-090.webp",
+      "logo": "https://exburst.dev/icon/logo_rnk.png",
+      "released": true
+    },
+    "REZ-": {
+      "name": "Re:Zero",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA40BT_REZ-1-090.webp",
+      "logo": "https://exburst.dev/icon/ua/logo_rez.png",
+      "released": true
+    },
+    "AOT-": {
+      "name": "Attack On Titan",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/AOT-1-027-ALT1.webp",
+      "logo": "https://exburst.dev/icon/logo_aot.png",
+      "released": true
+    },
+    "KIN-": {
+      "name": "Kinnikuman",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA39BT_KIN-1-051.webp",
+      "logo": "https://exburst.dev/icon/logo_kin.png",
+      "released": true
+    },
+    "FMA-": {
+      "name": "Fullmetal Alchemist",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/UA37BT_FMA-1-012_p1.webp",
+      "logo": "https://exburst.dev/icon/logo_fma.png",
+      "released": true
+    },
+    "WBK-": {
+      "name": "Windbreaker",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA01PC_WBK-1-001.webp",
+      "logo": "https://exburst.dev/icon/logo_wbk.png",
+      "released": true
+    },
+    "BAC-": {
+      "name": "Blue Archive",
+      "logo": "https://exburst.dev/icon/logo_bac.png",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/1740132351772UC02BT-BAC-1-030_1.webp",
+      "released": true
+    },
+    "OPM-": {
+      "name": "One Punch Man",
+      "favoriteCard": "https://exburst.dev/uaen/cards/sd/UEPR_OPM_AP01.webp",
+      "logo": "https://exburst.dev/icon/uaen/logo_opm.png",
+      "released": true
+    },
+    "CGD-": {
+      "name": "Code Geass: Rozé of the Recapture",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/UA34BT_CGD-1-027.webp",
+      "logo": "https://exburst.dev/icon/logo_cgd.png"
+    },
+    "NGR-": {
+      "name": "2.5 Dimensional Seduction",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA33BT_NGR-1-030.webp",
+      "logo": "https://exburst.dev/icon/logo_ngr.png"
+    },
+    "TSK-": {
+      "name": "That Time I Got Reincarnated as a Slime",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/EX09BT_TSK-2-044.webp",
+      "logo": "https://exburst.dev/icon/logo_tsk.png"
+    },
+    "SNF-": {
+      "name": "Shangri-la Frontier",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA32BT_SNF-1-007.webp",
+      "logo": "https://exburst.dev/icon/ua/series/logo_snf.png"
+    },
+    "ARK-": {
+      "name": "Arknights",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UAPR_ARK-1-077.webp",
+      "logo": "https://exburst.dev/icon/ua/series/logo_ark.png",
+      "released": true
+    },
+    "MMM-": {
+      "name": "Madoka Magika",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA31BT_MMM-1-008_p1.webp",
+      "logo": "https://exburst.dev/icon/ua/series/logo_mmm.png"
+    },
+    "SAO-": {
+      "name": "Sword Art Online",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/EX08BT_SAO-2-002.webp",
+      "logo": "https://exburst.dev/icon/logo_sao.png"
+    },
+    "KJ8-": {
+      "name": "Kaiju No. 8",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UA28BT_KJ8-1-019.webp",
+      "logo": "https://exburst.dev/icon/logo_kj8.png"
+    },
+    "AND-": {
+      "name": "Undead Unluck",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/AND-1-050.webp",
+      "logo": "https://exburst.dev/icon/logo_and.png"
+    },
+    "RLY-": {
+      "name": "100 Girlfriends",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/RLY-1-008-ALT1.webp",
+      "logo": "https://exburst.dev/icon/logo_rly.png"
+    },
+    "UA-": {
+      "name": "Union Arena",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/UAPR-2023-AP01.webp",
+      "logo": "https://exburst.dev/icon/logo_ua.png"
+    },
+    "MHA-": {
+      "name": "My Hero Academia",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/MHA-2-026.webp",
+      "logo": "https://exburst.dev/icon/logo_mha.png"
+    },
+    "SHY-": {
+      "name": "SHY",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/SHY-1-052.webp",
+      "logo": "https://exburst.dev/icon/logo_shy.png"
+    },
+    "KMY-": {
+      "name": "Demon Slayer",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/KMY-1-008.webp",
+      "logo": "https://exburst.dev/icon/logo_kmy.png"
+    },
+    "GMR-": {
+      "name": "Gamera -Rebirth-",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/GMR-1-008-ALT1.webp",
+      "logo": "https://exburst.dev/icon/logo_gmr.png"
+    },
+    "YYH-": {
+      "name": "Yū Yū Hakusho",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/YYH-1-038.webp",
+      "logo": "https://exburst.dev/icon/logo_yyh.png"
+    },
+    "BCV-": {
+      "name": "Black Clover",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/BCV-1-004.webp",
+      "logo": "https://exburst.dev/icon/logo_bcv.png"
+    },
+    "JJK-": {
+      "name": "Jujutsu Kaisen",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/JJK-1-105.webp",
+      "logo": "https://exburst.dev/icon/logo_jjk.png"
+    },
+    "HIQ-": {
+      "name": "Haikyu",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/HIQ-1-088.webp",
+      "logo": "https://exburst.dev/icon/logo_hiq.png"
+    },
+    "SYN-": {
+      "name": "Synduality",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/SYN-1-003.webp",
+      "logo": "https://exburst.dev/icon/logo_syn.png"
+    },
+    "TRK-": {
+      "name": "Toriko",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/TRK-1-054-ALT2.webp",
+      "logo": "https://exburst.dev/icon/logo_trk.png"
+    },
+    "CGH-": {
+      "name": "Code Geass",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/CGH-2-042.webp",
+      "logo": "https://exburst.dev/icon/logo_cgh.png"
+    },
+    "HTR-": {
+      "name": "Hunter x Hunter",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/HTR-1-074.webp",
+      "logo": "https://exburst.dev/icon/logo_htr.png"
+    },
+    "GNT-": {
+      "name": "Gintama",
+      "favoriteCard": "https://exburst.dev/ua/cards/hd/GNT-1-089.webp",
+      "logo": "https://exburst.dev/icon/logo_gnt.png"
+    },
+    "TOA-": {
+      "name": "Tales of Arise",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/TOA-1-070.webp",
+      "logo": "https://exburst.dev/icon/logo_toa.png"
+    },
+    "BTR-": {
+      "name": "Roboco",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/BTR-1-022-ALT1.webp",
+      "logo": "https://exburst.dev/icon/logo_btr.png"
+    },
+    "BLC-": {
+      "name": "Bleach",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/BLC-1-041-ALT1.webp",
+      "logo": "https://exburst.dev/icon/logo_blc.png",
+      "released": true
+    },
+    "BLK-": {
+      "name": "Blue Lock",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/BLK-1-004.webp",
+      "logo": "https://exburst.dev/icon/logo_blk.png"
+    },
+    "TKN-": {
+      "name": "Tekken",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/TKN-1-019.webp",
+      "logo": "https://exburst.dev/icon/logo_tkn.png"
+    },
+    "DST-": {
+      "name": "Dr. Stone",
+      "favoriteCard": "https://exburst.dev/ua/cards/sd/DST-1-078.webp",
+      "logo": "https://exburst.dev/icon/logo_dst.png"
+    }
+  },
+  "deckbuilderCountColumns": {
+    "rows": [
+      [
+        {
+          "label": "<img src='https://exburst.dev/icon/color_icon.png'>",
+          "key": "_trigger",
+          "equal": "Color",
+          "maximum": 4
+        },
+        {
+          "label": "<img src='https://exburst.dev/icon/final_icon.png'>",
+          "key": "_trigger",
+          "equal": "Final",
+          "maximum": 4
+        },
+        {
+          "label": "<img src='https://exburst.dev/icon/special_icon.png'>",
+          "key": "_trigger",
+          "equal": "Special",
+          "maximum": 4
+        },
+        {
+          "label": "⚡Triggers: ",
+          "key": "_trigger",
+          "equal": "",
+          "contains": true,
+          "exclude": "none"
+        }
+      ]
+    ]
+  },
+  "charts": [
+    {
+      "name": "Cost Range",
+      "column": "energyCost",
+      "customRange": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "id": "triggers",
+      "name": "Triggers",
+      "column": "_trigger",
+      "customRange": [
+        "Draw",
+        "Get",
+        "Active",
+        "Raid",
+        "Color",
+        "Special",
+        "Final"
+      ]
+    },
+    {
+      "name": "Power Range",
+      "column": "power",
+      "type": "number",
+      "ignoredValues": [
+        "0"
+      ],
+      "maxValue": 10000,
+      "ignoreEmptyValues": true,
+      "rangeStep": 1000
+    }
+  ],
+  "deckbuilderCostChartRange": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "tooltip": {
+    "columns": [
+      {
+        "label": "Card Name",
+        "key": "name"
+      },
+      {
+        "label": "Card No.",
+        "key": "cardNo"
+      },
+      {
+        "label": "Card Type",
+        "key": "type"
+      },
+      {
+        "label": "Features",
+        "key": "traits"
+      },
+      {
+        "label": "Power",
+        "key": "power"
+      },
+      {
+        "label": "Effect",
+        "key": "effect"
+      },
+      {
+        "label": "Trigger",
+        "key": "_triggerText",
+        "format": "<b> ${_trigger}</b>: ${_triggerText}"
+      },
+      {
+        "label": "Series",
+        "key": "series"
+      },
+      {
+        "label": "Rarity",
+        "key": "rarity"
+      }
+    ]
+  },
+  "gameTags": [
+    "[Damage (2) ]",
+    "[Damage (3) ]",
+    "[Damage +1]",
+    "[Double Attack]",
+    "[Double Block]",
+    "[Impact (1) ]",
+    "[Impact 1]",
+    "[Impact (2) ]",
+    "[Impact +1]",
+    "[Impact Negate]",
+    "[Raid]",
+    "[Sniper]",
+    "[Step]"
+  ],
+  "CardInfoColumns": [
+    {
+      "column_name": "color",
+      "label": "Color",
+      "layout": "1x1",
+      "style": "Tag Style"
+    },
+    {
+      "column_name": "type",
+      "label": "Type",
+      "layout": "1x1",
+      "style": "Tag Style"
+    },
+    {
+      "column_name": "effect",
+      "label": "Effect",
+      "layout": "3xA",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "traits",
+      "label": "Features",
+      "layout": "3x1",
+      "style": "Tag Style",
+      "delimiter": "/"
+    },
+    {
+      "column_name": "generatedEnergyData",
+      "label": "Cost (Energy)",
+      "layout": "1x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "apCost",
+      "label": "Cost (AP)",
+      "layout": "1x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "power",
+      "label": "Power",
+      "layout": "1x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "generatedEnergyData",
+      "label": "Energy Gen.",
+      "layout": "1x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "_triggerText",
+      "label": "Trigger",
+      "layout": "3x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "rarity",
+      "label": "Rarity",
+      "layout": "1x1",
+      "style": "Tag Style"
+    },
+    {
+      "column_name": "raritytype",
+      "label": "Rarity Type",
+      "layout": "1x1",
+      "style": "Text Style"
+    },
+    {
+      "column_name": "series",
+      "label": "Series",
+      "layout": "1x1",
+      "style": "Tag Style"
+    }
+  ],
+  "tagColors": {
+    "[1 Per Turn]": "rgba(218, 223, 225, 1)",
+    "[Activate this card]": "rgb(50,205,50)",
+    "[Damage (2) ]": "rgba(255,255,0, 1)",
+    "[Damage (3) ]": "rgba(255,255,0, 1)",
+    "[Damage +1]": "rgba(255,255,0, 1)",
+    "[Damage]": "rgba(255,255,0, 1)",
+    "[Discard 1]": "rgba(0, 123, 255, 1)",
+    "[Discard 2]": "rgba(0, 123, 255, 1)",
+    "[Discard 3]": "rgba(0, 123, 255, 1)",
+    "[Double Attack]": "rgba(255,255,0, 1)",
+    "[Double Block]": "rgba(255,255,0, 1)",
+    "[Impact (1) ]": "rgba(255,255,0, 1)",
+    "[Impact (7)]": "rgba(255,255,0, 1)",
+    "[Impact (3)]": "rgba(255,255,0, 1)",
+    "[Damage (7)]": "rgba(255,255,0, 1)",
+    "[Impact 1]": "rgba(255,255,0, 1)",
+    "[Impact (2) ]": "rgba(255,255,0, 1)",
+    "[Impact +1]": "rgba(255,255,0, 1)",
+    "[Impact Negate]": "rgba(255,255,0, 1)",
+    "[Impact]": "rgba(255,255,0, 1)",
+    "[Main]": "rgba(0, 123, 255, 1)",
+    "[On Block]": "rgba(0, 123, 255, 1)",
+    "[On Play]": "rgba(0, 123, 255, 1)",
+    "[On Retire]": "rgba(0, 123, 255, 1)",
+    "[Opponent's Turn]": "rgba(0, 123, 255, 1)",
+    "[Pay 1 AP]": "rgba(255, 0, 0, 1)",
+    "[Raid]": "rgba(255, 0, 0, 1)",
+    "[Rest this card]": "rgba(255, 0, 0, 1)",
+    "[Retire this card]": "rgba(255, 0, 0, 1)",
+    "[Sniper]": "rgba(255,255,0, 1)",
+    "[Step]": "rgba(255,255,0, 1)",
+    "[Trigger]": "rgba(0, 0, 0, 1)",
+    "[When Attacking]": "rgba(0, 123, 255, 1)",
+    "[When In Energy Line]": "rgba(255, 0, 0, 1)",
+    "[When in Energy Line]": "rgba(255, 0, 0, 1)",
+    "[When in Outside Area]": "rgba(255, 0, 0, 1)",
+    "[When in Frontline]": "rgba(255, 0, 0, 1)",
+    "[Your Turn]": "rgba(0, 123, 255, 1)"
+  },
+  "nameBackgrounds": {
+    "TSK": "https://exburst.dev/icon/tsk_bg_title_field.png",
+    "TOA": "https://exburst.dev/icon/toa_bg_title_field.png",
+    "MHA": "https://exburst.dev/icon/mha_bg_title_field.png",
+    "KMY": "https://exburst.dev/icon/kmy_bg_title_field.png",
+    "JJK": "https://exburst.dev/icon/jjk_bg_title_field.png",
+    "IMS": "https://exburst.dev/icon/ims_bg_title_field.png",
+    "HTR": "https://exburst.dev/icon/htr_bg_title_field.png",
+    "GNT": "https://exburst.dev/icon/gnt_bg_title_field.png",
+    "BTR": "https://exburst.dev/icon/btr_bg_title_field.png",
+    "CGH": "https://exburst.dev/icon/cgh_bg_title_field.png",
+    "CGD": "https://exburst.dev/icon/cgd_bg_title_field.png",
+    "BLC": "https://exburst.dev/icon/blc_bg_title_field.png",
+    "BLK": "https://exburst.dev/icon/blk_bg_title_field.png",
+    "SAO": "https://exburst.dev/icon/sao_bg_title_field.png",
+    "TKN": "https://exburst.dev/icon/tkn_bg_title_field.png",
+    "ALT": "https://exburst.dev/icon/alt_bg_title_field.png",
+    "DST": "https://exburst.dev/icon/dst_bg_title_field.png",
+    "SYN": "https://exburst.dev/icon/syn_bg_title_field.png",
+    "TRK": "https://exburst.dev/icon/trk_bg_title_field.png",
+    "HIQ": "https://exburst.dev/icon/hiq_bg_title_field.png",
+    "NIK": "https://exburst.dev/icon/nik_bg_title_field.png",
+    "BCV": "https://exburst.dev/icon/bcv_bg_title_field.png",
+    "YYH": "https://exburst.dev/icon/yyh_bg_title_field.png",
+    "GMR": "https://exburst.dev/icon/gmr_bg_title_field.png",
+    "AOT": "https://exburst.dev/icon/aot_bg_title_field.png",
+    "AND": "https://exburst.dev/icon/and_bg_title_field.png",
+    "RLY": "https://exburst.dev/icon/rly_bg_title_field.png",
+    "SHY": "https://exburst.dev/icon/shy_bg_title_field.png",
+    "GIM": "https://exburst.dev/icon/gim_bg_title_field.png",
+    "WBK": "https://exburst.dev/icon/wbk_bg_title_field.png",
+    "FMA": "https://exburst.dev/icon/fma_bg_title_field.png",
+    "KMR": "https://exburst.dev/icon/kmr_bg_title_field.png",
+    "ARK": "https://exburst.dev/icon/ark_bg_title_field.png",
+    "KJ8": "https://exburst.dev/icon/kj8_bg_title_field.png",
+    "MMM": "https://exburst.dev/icon/mmm_bg_title_field.png",
+    "SNF": "https://exburst.dev/icon/snf_bg_title_field.png",
+    "NGR": "https://exburst.dev/icon/ngr_bg_title_field.png",
+    "OPM": "https://exburst.dev/icon/opm_bg_title_field.png",
+    "BAC": "https://exburst.dev/icon/bac_bg_title_field.png",
+    "MCR": "https://exburst.dev/icon/mcr_bg_title_field.png",
+    "KIN": "https://exburst.dev/icon/kin_bg_title_field.png",
+    "REZ": "https://exburst.dev/icon/ims_bg_title_field.png"
+  },
+  "seriesBackground": {
+    "TSK": "https://exburst.dev/icon/tsk_cardbg.png",
+    "TOA": "https://exburst.dev/icon/toa_cardbg.png",
+    "MHA": "https://exburst.dev/icon/mha_cardbg.png",
+    "KMY": "https://exburst.dev/icon/kmy_cardbg.png",
+    "JJK": "https://exburst.dev/icon/jjk_cardbg.png",
+    "IMS": "https://exburst.dev/icon/ims_cardbg.png",
+    "HTR": "https://exburst.dev/icon/htr_cardbg.png",
+    "GNT": "https://exburst.dev/icon/gnt_cardbg.png",
+    "BTR": "https://exburst.dev/icon/btr_cardbg.png",
+    "CGH": "https://exburst.dev/icon/cgh_cardbg.png",
+    "CGD": "https://exburst.dev/icon/cgd_cardbg.png",
+    "BLC": "https://exburst.dev/icon/blc_cardbg.png",
+    "BLK": "https://exburst.dev/icon/blk_cardbg.png",
+    "SAO": "https://exburst.dev/icon/sao_cardbg.png",
+    "TKN": "https://exburst.dev/icon/tkn_cardbg.png",
+    "DST": "https://exburst.dev/icon/dst_cardbg.png",
+    "SYN": "https://exburst.dev/icon/syn_cardbg.png",
+    "TRK": "https://exburst.dev/icon/trk_cardbg.png",
+    "HIQ": "https://exburst.dev/icon/hiq_cardbg.png",
+    "NIK": "https://exburst.dev/icon/nik_cardbg.png",
+    "BCV": "https://exburst.dev/icon/bcv_cardbg.png",
+    "YYH": "https://exburst.dev/icon/yyh_cardbg.png",
+    "GMR": "https://exburst.dev/icon/gmr_cardbg.png",
+    "AOT": "https://exburst.dev/icon/aot_cardbg.png",
+    "AND": "https://exburst.dev/icon/and_cardbg.png",
+    "RLY": "https://exburst.dev/icon/rly_cardbg.png",
+    "SHY": "https://exburst.dev/icon/shy_cardbg.png",
+    "GIM": "https://exburst.dev/icon/gim_cardbg.png",
+    "WBK": "https://exburst.dev/icon/wbk_cardbg.png",
+    "FMA": "https://exburst.dev/icon/fma_cardbg.png",
+    "KMR": "https://exburst.dev/icon/kmr_cardbg.png",
+    "ARK": "https://exburst.dev/icon/ark_cardbg.png",
+    "MMM": "https://exburst.dev/icon/mmm_cardbg.png",
+    "SNF": "https://exburst.dev/icon/snf_cardbg.png",
+    "NGR": "https://exburst.dev/icon/ngr_cardbg.png",
+    "KJ8": "https://exburst.dev/icon/kj8_cardbg.png",
+    "OPM": "https://exburst.dev/icon/opm_cardbg.png",
+    "MCR": "https://exburst.dev/icon/mcr_cardbg.png",
+    "BAC": "https://exburst.dev/icon/bac_cardbg.png",
+    "KIN": "https://exburst.dev/icon/kin_cardbg.png",
+    "REZ": "https://exburst.dev/icon/ngr_cardbg.png"
+  },
+  "customNameplates": {
+    "default": "https://exburst.dev/icon/custom/assets/ua/template-card-header.png",
+    "TSK": "https://exburst.dev/icon/custom/assets/ua/plates/TSK.png",
+    "TOA": "https://exburst.dev/icon/custom/assets/ua/plates/TOA.png",
+    "MHA": "https://exburst.dev/icon/custom/assets/ua/plates/MHA.png",
+    "KMY": "https://exburst.dev/icon/custom/assets/ua/plates/KMY.png",
+    "JJK": "https://exburst.dev/icon/custom/assets/ua/plates/JJK.png",
+    "IMS": "https://exburst.dev/icon/custom/assets/ua/plates/IMS.png",
+    "HTR": "https://exburst.dev/icon/custom/assets/ua/plates/HTR.png",
+    "GNT": "https://exburst.dev/icon/custom/assets/ua/plates/GNT.png",
+    "BTR": "https://exburst.dev/icon/custom/assets/ua/plates/BTR.png",
+    "CGH": "https://exburst.dev/icon/custom/assets/ua/plates/CGH.png",
+    "BLC": "https://exburst.dev/icon/custom/assets/ua/plates/BLC.png",
+    "BLK": "https://exburst.dev/icon/custom/assets/ua/plates/BLK.png",
+    "SAO": "https://exburst.dev/icon/custom/assets/ua/plates/SAO.png",
+    "TKN": "https://exburst.dev/icon/custom/assets/ua/plates/TKN.png",
+    "DST": "https://exburst.dev/icon/custom/assets/ua/plates/DST.png",
+    "SYN": "https://exburst.dev/icon/custom/assets/ua/plates/SYN.png",
+    "TRK": "https://exburst.dev/icon/custom/assets/ua/plates/TRK.png",
+    "HIQ": "https://exburst.dev/icon/custom/assets/ua/plates/HIQ.png",
+    "NIK": "https://exburst.dev/icon/custom/assets/ua/plates/NIK.png",
+    "BCV": "https://exburst.dev/icon/custom/assets/ua/plates/BCV.png",
+    "YYH": "https://exburst.dev/icon/custom/assets/ua/plates/YYH.png",
+    "GMR": "https://exburst.dev/icon/custom/assets/ua/plates/GMR.png",
+    "AOT": "https://exburst.dev/icon/custom/assets/ua/plates/AOT.png",
+    "AND": "https://exburst.dev/icon/custom/assets/ua/plates/AND.png",
+    "RLY": "https://exburst.dev/icon/custom/assets/ua/plates/RLY.png",
+    "SHY": "https://exburst.dev/icon/custom/assets/ua/plates/SHY.png",
+    "GIM": "https://exburst.dev/icon/custom/assets/ua/plates/GIM.png",
+    "KMR": "https://exburst.dev/icon/custom/assets/ua/plates/KMR.png",
+    "ARK": "https://exburst.dev/icon/custom/assets/ua/plates/ARK.png",
+    "KJ8": "https://exburst.dev/icon/custom/assets/ua/plates/KJ8.png",
+    "MMM": "https://exburst.dev/icon/custom/assets/ua/plates/MMM.png",
+    "SNF": "https://exburst.dev/icon/custom/assets/ua/plates/SNF.png",
+    "NGR": "https://exburst.dev/icon/custom/assets/ua/plates/NGR.png",
+    "OPM": "https://exburst.dev/icon/custom/assets/ua/plates/OPM.png",
+    "MCR": "https://exburst.dev/icon/custom/assets/ua/plates/MCR.png",
+    "BAC": "https://exburst.dev/icon/custom/assets/ua/plates/BAC.png",
+    "CGD": "https://exburst.dev/icon/custom/assets/ua/plates/CGD.png"
+  },
+  "tagImage": {
+    "[yellow]": "https://exburst.dev/icon/yellow_energy.png,4",
+    "[red]": "https://exburst.dev/icon/red_energy.png,4",
+    "[blue]": "https://exburst.dev/icon/blue_energy.png,4",
+    "[purple]": "https://exburst.dev/icon/purple_energy.png,4",
+    "[green]": "https://exburst.dev/icon/green_energy.png,4",
+    "(b)": "https://exburst.dev/icon/custom/assets/ua/color-gen-blue.png,5",
+    "(g)": "https://exburst.dev/icon/custom/assets/ua/color-gen-green.png,5",
+    "(p)": "https://exburst.dev/icon/custom/assets/ua/color-gen-purple.png,5",
+    "(y)": "https://exburst.dev/icon/custom/assets/ua/color-gen-yellow.png,5",
+    "(r)": "https://exburst.dev/icon/custom/assets/ua/color-gen-red.png,5",
+    "(1)": "https://exburst.dev/icon/one-yellow-32x32.png,3",
+    "(2)": "https://exburst.dev/icon/two-yellow-32x32.png,3",
+    "(3)": "https://exburst.dev/icon/three-yellow-32x32.png,3",
+    "(y1)": "https://exburst.dev/icon/ua/ico_hexa_yellow.png,3",
+    "(b1)": "https://exburst.dev/icon/ua/ico_hexa_blue.png,3",
+    "(g1)": "https://exburst.dev/icon/ua/ico_hexa_green.png,3",
+    "(p1)": "https://exburst.dev/icon/ua/ico_hexa_purple.png,3",
+    "(r1)": "https://exburst.dev/icon/ua/ico_hexa_red.png,3",
+    "[Raid]": "https://exburst.dev/icon/ua/ico_raid.png,13",
+    "(Once Per Turn)": "https://exburst.dev/icon/ua/ico_turn1.png,20",
+    "(Activate: Main)": "https://exburst.dev/icon/ua/ico_standup.png,26",
+    "(During Your Turn)": "https://exburst.dev/icon/ua/ico_myturn.png,28",
+    "(During Opponent's Turn)": "https://exburst.dev/icon/ua/ico_yourturn.png,39",
+    "(When Played)": "https://exburst.dev/icon/ua/ico_appearance.png,22",
+    "(When Attacking)": "https://exburst.dev/icon/ua/ico_attack.png,26",
+    "(When Blocking)": "https://exburst.dev/icon/ua/ico_block.png,26",
+    "(When Sidelined)": "https://exburst.dev/icon/ua/ico_exit.png,27",
+    "(Impact)": "https://exburst.dev/icon/ua/ico_impact.png,17",
+    "(Impact 1)": "https://exburst.dev/icon/ua/ico_impact1.png,17",
+    "(Impact 2)": "https://exburst.dev/icon/ua/ico_impact2.png,17",
+    "(Impact 3)": "https://exburst.dev/icon/ua/ico_impact3.png,17",
+    "(Impact 4)": "https://exburst.dev/icon/ua/ico_impact4.png,17",
+    "(Impact 5)": "https://exburst.dev/icon/ua/ico_impact5.png,17",
+    "(Impact 6)": "https://exburst.dev/icon/ua/ico_impact6.png,17",
+    "(Impact 7)": "https://exburst.dev/icon/ua/ico_impact7.png,17",
+    "(Impact +1)": "https://exburst.dev/icon/ua/ico_impact_plus1.png,19",
+    "(Damage +1)": "https://exburst.dev/icon/ua/ico_damage_plus1.png,19",
+    "(Damage 2)": "https://exburst.dev/icon/ua/ico_damage2.png,17",
+    "(Damage 3)": "https://exburst.dev/icon/ua/ico_damage3.png,17",
+    "(Damage 4)": "https://exburst.dev/icon/ua/ico_damage4.png,17",
+    "(Damage 5)": "https://exburst.dev/icon/ua/ico_damage5.png,17",
+    "(Damage 6)": "https://exburst.dev/icon/ua/ico_damage6.png,17",
+    "(Damage 7)": "https://exburst.dev/icon/ua/ico_damage7.png,17",
+    "(Double Attack)": "https://exburst.dev/icon/ua/ico_wattack.png,23",
+    "(Double Block)": "https://exburst.dev/icon/ua/ico_wblock.png,21",
+    "(Snipe)": "https://exburst.dev/icon/ua/ico_sniping.png,13",
+    "(Nullify Impact)": "https://exburst.dev/icon/ua/ico_disimpact.png,22",
+    "(Sideline This Card)": "https://exburst.dev/icon/ua/ico_exit_card.png,30",
+    "(If On The Front line)": "https://exburst.dev/icon/ua/ico_frontl.png,32",
+    "(If In The Energy Line)": "https://exburst.dev/icon/ua/ico_energyl.png,33",
+    "(Place 1 Card From Hand Into Sideline)": "https://exburst.dev/icon/ua/ico_outside.png,58",
+    "(Place 2 Card From Hand Into Sideline)": "https://exburst.dev/icon/ua/ico_outside2.png,58",
+    "(Place 3 Card From Hand Into Sideline)": "https://exburst.dev/icon/ua/ico_outside3.png,58",
+    "(Switch To Resting)": "https://exburst.dev/icon/ua/ico_rest.png,26",
+    "(Pay 1 AP)": "https://exburst.dev/icon/ua/ico_ap1.png,15",
+    "(Raid)": "https://exburst.dev/icon/ua/ico_raid_trigger.png,13",
+    "(Get)": "https://exburst.dev/icon/ua/ico_get_trigger.png,13",
+    "(Draw)": "https://exburst.dev/icon/ua/ico_draw_trigger.png,13",
+    "(Active)": "https://exburst.dev/icon/ua/ico_active_trigger.png,13",
+    "(Special)": "https://exburst.dev/icon/ua/ico_special_trigger.png,13",
+    "(Color)": "https://exburst.dev/icon/ua/ico_color_trigger.png,13",
+    "(Final)": "https://exburst.dev/icon/ua/ico_final_trigger.png,13",
+    "(Step)": "https://exburst.dev/icon/ua/ico_step.png,13"
+  },
+  "filters": [
+    {
+      "name": "Colors",
+      "property": "color",
+      "type": "OptionSet",
+      "default": true,
+      "adv-id": "color",
+      "quick-adv-id": "c"
+    },
+    {
+      "name": "Type",
+      "property": "type",
+      "type": "OptionSet",
+      "default": true,
+      "showImage": true,
+      "adv-id": "type",
+      "quick-adv-id": "type"
+    },
+    {
+      "name": "Set Number",
+      "property": "_setNumber",
+      "type": "OptionSet",
+      "extractFrom": "cardNo",
+      "extractPattern": "setExtractPattern",
+      "adv-id": "set",
+      "quick-adv-id": "s"
+    },
+    {
+      "name": "Rarity",
+      "property": "rarity",
+      "type": "OptionSet",
+      "adv-id": "rarity",
+      "quick-adv-id": "r"
+    },
+    {
+      "name": "Rarity Type",
+      "property": "raritytype",
+      "type": "OptionSet",
+      "alternate-counted": true,
+      "adv-id": "raritytype",
+      "quick-adv-id": "rt"
+    },
+    {
+      "name": "Features",
+      "property": "traits",
+      "delimiters": [
+        "|"
+      ],
+      "includes": true,
+      "type": "OptionSet",
+      "showImage": true,
+      "imageMainValue": "type",
+      "imageMainColumn": "Character",
+      "adv-id": "traits",
+      "quick-adv-id": "t"
+    },
+    {
+      "name": "Power",
+      "property": "power",
+      "type": "Numbers",
+      "adv-id": "power",
+      "quick-adv-id": "p"
+    },
+    {
+      "name": "Energy Cost",
+      "property": "generatedEnergyData",
+      "type": "Numbers",
+      "adv-id": "cost",
+      "quick-adv-id": "cost"
+    },
+    {
+      "name": "Trigger",
+      "property": "_trigger",
+      "lastCharacter": "]",
+      "type": "OptionSet",
+      "adv-id": "trigger",
+      "quick-adv-id": "tr"
+    },
+    {
+      "name": "AP Cost",
+      "property": "apCost",
+      "type": "Numbers",
+      "adv-id": "ap",
+      "quick-adv-id": "ap"
+    },
+    {
+      "name": "Generated Energy",
+      "property": "generatedEnergyData",
+      "type": "Numbers",
+      "adv-id": "energy",
+      "quick-adv-id": "gen"
+    },
+    {
+      "name": "Show Only Alternates",
+      "property": "mainalternate",
+      "type": "Boolean",
+      "uniqueName": "showOnlyAlternates",
+      "neededValue": false
+    }
+  ],
+  "textFilterColumns": [
+    "name",
+    "traits",
+    "effect",
+    "_trigger",
+    "cardNo"
+  ],
+  "user-stapple-column-name": "ua-stapples",
+  "deckSeparators": [
+    "Character",
+    "Event",
+    "Field"
+  ],
+  "deckSeparators_column": "type",
+  "deckGroupMerging": {
+    "enabled": true,
+    "keepTypes": [
+      "Character"
+    ],
+    "mergedLabel": "Others"
+  },
+  "ignoredSeparators": [
+    "AP",
+    "Others"
+  ],
+  "editorColumnsOptions": {
+    "imageLink": {
+      "type": "EditorImageSelector"
+    },
+    "cardNo": {
+      "type": "EditableTextboxInput"
+    },
+    "name": {
+      "type": "EditableTextboxInput"
+    },
+    "traits": {
+      "type": "EditableMultilineTextboxInput"
+    },
+    "type": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "Character",
+        "Event",
+        "Field",
+        "AP"
+      ]
+    },
+    "color": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "Yellow",
+        "Purple",
+        "Red",
+        "Blue",
+        "Green",
+        "Rainbow"
+      ]
+    },
+    "rarity": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "U",
+        "C",
+        "R",
+        "SR",
+        "SP"
+      ]
+    },
+    "_trigger": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "Draw",
+        "Get",
+        "Active",
+        "Raid",
+        "Color",
+        "Special",
+        "Final"
+      ]
+    },
+    "apCost": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "1",
+        "2",
+        "3"
+      ]
+    },
+    "generatedEnergyData": {
+      "type": "EditableSelectInput",
+      "options": [
+        "",
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10"
+      ]
+    },
+    "created_at": {
+      "type": "EditableDatepickerInput"
+    },
+    "updated_at": {
+      "type": "EditableDatepickerInput"
+    },
+    "raritytype": {
+      "type": "EditableMultilineTextboxInput"
+    },
+    "series": {
+      "type": "EditableSelectInput"
+    },
+    "effect": {
+      "type": "EditableMultilineTextboxInput"
+    },
+    "originalId": {
+      "type": "EditableMultilineTextboxInput"
+    },
+    "published": {
+      "type": "EditableSelectInput",
+      "options": [
+        "0",
+        "1"
+      ]
+    }
+  },
+  "editColumnLabels": {
+    "cardNo": "Card Number",
+    "rarity": "Rarity Level"
+  },
+  "footer": [
+    {
+      "label": "Union Arena Official",
+      "url": "https://www.unionarena-tcg.com/"
+    },
+    {
+      "label": "ExBurst.dev",
+      "url": "https://exburst.dev/"
+    },
+    {
+      "label": "GDPR",
+      "url": "https://exburst.dev/gdpr.html"
+    },
+    {
+      "label": "Hall of fame",
+      "url": "https://exburst.dev/halloffame.php"
+    }
+  ],
+  "selectableItems": [
+    {
+      "name": "Aggro",
+      "spriteLink": "https://exburst.dev/icon/tag/tag-aggro.png",
+      "identifier": "aggro"
+    },
+    {
+      "name": "Combo",
+      "spriteLink": "https://exburst.dev/icon/tag/tag-combo.png",
+      "identifier": "combo"
+    },
+    {
+      "name": "Control",
+      "spriteLink": "https://exburst.dev/icon/tag/tag-control.png",
+      "identifier": "control"
+    },
+    {
+      "name": "Midrange",
+      "spriteLink": "https://exburst.dev/icon/tag/tag-midrange.png",
+      "identifier": "midrange"
+    },
+    {
+      "name": "Fun",
+      "spriteLink": "https://exburst.dev/icon/tag/tag-fun.png",
+      "identifier": "fun"
+    }
+  ],
+  "max-selectable-items": 1,
+  "selectItemLabel": "Deck Style",
+  "ordering-list": [
+    {
+      "ordering-column": "cardNo",
+      "label": "ID",
+      "ordering-type": "string"
+    },
+    {
+      "ordering-column": "name",
+      "label": "Name",
+      "ordering-type": "string"
+    },
+    {
+      "ordering-column": "energyCost",
+      "label": "Cost",
+      "ordering-type": "int"
+    },
+    {
+      "ordering-column": "generatedEnergyData",
+      "label": "Energy Gen.",
+      "ordering-type": "int"
+    },
+    {
+      "ordering-column": "apCost",
+      "label": "AP",
+      "ordering-type": "int"
+    },
+    {
+      "ordering-column": "power",
+      "label": "BP",
+      "ordering-type": "int"
+    }
+  ],
+  "customMajorVersion": "1",
+  "archetype-max": 4,
+  "unknown-archetype-icon": "https://exburst.dev/icon/pokemon/unknown-gen5.png",
+  "archetype-min-cards": 1,
+  "archetypesRarity": [
+    "SR"
+  ],
+  "archetypeColumn": "rarity",
+  "statsConfig": {
+    "type": "ua",
+    "lifePointsCards": 7,
+    "searcherKeywords": [
+      "search",
+      "look",
+      "reveal",
+      "find",
+      "add",
+      "seek",
+      "reveal",
+      "look at",
+      "add to hand",
+      "search your deck"
+    ],
+    "energyLabel": "AP",
+    "resourceLabel": "AP",
+    "cardCurve_column": "apCost",
+    "cardCurve_minimum": 0,
+    "cardGeneration_column": "generatedEnergyData",
+    "cardCost_column": "energyCost",
+    "cardEffect_column": "effect",
+    "customStats": [
+      {
+        "id": "turn1-energy-cost-0-probability",
+        "type": "turn1EnergyCost0Probability",
+        "name": "Turn 1 Energy Cost 0 Card",
+        "description": "Probability of having at least one Energy Cost 0 card in your opening hand",
+        "resourceLabel": "AP",
+        "config": {
+          "targetEnergyCosts": [
+            0
+          ],
+          "startingHandSize": 7,
+          "mulligan": true,
+          "mulliganSize": 7
+        }
+      },
+      {
+        "id": "turn1-ap-cost-1",
+        "type": "turn1APCost1Probability",
+        "name": "Turn 1 AP Cost 1 Card",
+        "description": "Probability of having at least one card with AP Cost 1 and Energy Cost 0 in your opening hand",
+        "resourceLabel": "AP",
+        "config": {
+          "firstPlayerEnergyCosts": [
+            0
+          ],
+          "firstPlayerAPCosts": [
+            1
+          ],
+          "startingHandSize": 7,
+          "mulligan": true,
+          "mulliganSize": 7
+        }
+      },
+      {
+        "id": "turn2-energy-cost-1",
+        "type": "turn2EnergyCost1Probability",
+        "name": "Turn 2 Energy Cost 1 Card",
+        "description": "Probability of having at least one card with Energy Cost 1 by turn 2",
+        "resourceLabel": "AP",
+        "config": {
+          "targetEnergyCosts": [
+            1
+          ],
+          "startingHandSize": 7,
+          "cardsDrawnPerTurn": 1
+        }
+      },
+      {
+        "id": "turn2-playable-cards",
+        "type": "turn2PlayableCardsProbability",
+        "name": "Turn 2 Playable Cards",
+        "description": "Probability of having playable cards on turn 2 (2 AP available, energy cost 0-2)",
+        "resourceLabel": "AP",
+        "config": {
+          "targetEnergyCosts": [
+            0,
+            1,
+            2
+          ],
+          "targetAPCosts": [
+            1,
+            2
+          ],
+          "startingHandSize": 7,
+          "cardsDrawnPerTurn": 1
+        }
+      }
+    ],
+    "progression": [
+      {
+        "turn": 1,
+        "firstPlayer": 1,
+        "secondPlayer": 2,
+        "cardsDrawn": 7
+      },
+      {
+        "turn": 2,
+        "firstPlayer": 2,
+        "secondPlayer": 2,
+        "cardsDrawn": 1
+      },
+      {
+        "turn": 3,
+        "firstPlayer": 3,
+        "secondPlayer": 3,
+        "cardsDrawn": 1
+      }
+    ]
+  },
+  "deckOrderColumn": "energyCost",
+  "cardsDrawnPerTurn": 1,
+  "hasMulligan": true,
+  "mulliganSize": 7,
+  "mulliganType": "draw-shuffle",
+  "mulliganDescription": "Place the initial hand next to the deck and draw 7 cards from the deck, add back the initial hand next to the deck and then shuffle the deck.",
+  "lifePointsSystem": true,
+  "totalLifePoints": 7,
+  "archetypeIdentifier_column": "originalId",
+  "bannedRestrictedCards": {
+    "banned": [],
+    "restricted": [
+      {
+        "originalId": "CGD-1-070",
+        "maxCopies": 1
+      },
+      {
+        "originalId": "CGH-1-083",
+        "maxCopies": 1
+      },
+      {
+        "originalId": "SAO-2-029",
+        "maxCopies": 2
+      }
+    ],
+    "mutuallyExclusive": []
+  }
+}

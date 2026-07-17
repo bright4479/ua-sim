@@ -1,0 +1,7 @@
+data/image-failures.json
+.claude/
+rule_manual.pdf
+site/
+site-package/
+ua-site.tar.gz
+*.tar.gz
