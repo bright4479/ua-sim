@@ -30,7 +30,9 @@ const GameUI = (() => {
     },
     async chooseMovements(p) {
       movesBuffer = [];
+      movedUpThisPhase = new Set();
       await waitFor('movement');
+      movedUpThisPhase = new Set();
       return movesBuffer;
     },
     async chooseMainAction(p) { return await waitFor('main'); },
@@ -412,16 +414,25 @@ const GameUI = (() => {
     }
   }
 
-  // free movement during Move Phase: swap between lines instantly, unlimited times
+  // free movement during Move Phase:
+  // - energy → front: อิสระ กี่รอบก็ได้
+  // - front → energy: ต้องมี [Step] เท่านั้น (ยกเว้น "ย้อน" ใบที่เพิ่งย้ายขึ้นใน phase นี้)
+  let movedUpThisPhase = new Set();
   function freeMove(u, to) {
     const me = Engine.G.players[0];
     const from = me.front.includes(u) ? me.front : me.energy;
     const dest = to === 'front' ? me.front : me.energy;
     if (from === dest) return;
     if (u.card.type !== 'Character') { DeckBuilder.toast('Site ย้ายไม่ได้'); return; }
+    if (to === 'energy' && !u.kw.step && !movedUpThisPhase.has(u.uid)) {
+      DeckBuilder.toast(`${u.card.name} ไม่มี [Step] — ย้ายลง Energy Line ไม่ได้`);
+      return;
+    }
     if (dest.length >= 4) { DeckBuilder.toast('ปลายทางเต็ม (4 ใบ) — ย้ายใบอื่นออกก่อน'); return; }
     from.splice(from.indexOf(u), 1);
     dest.push(u);
+    if (to === 'front') movedUpThisPhase.add(u.uid);
+    else movedUpThisPhase.delete(u.uid);
     Engine.log(`คุณ ย้าย ${u.card.name} ไป ${to === 'front' ? 'Front' : 'Energy'} Line`);
     render();
   }
