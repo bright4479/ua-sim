@@ -122,7 +122,8 @@ select:focus, input:focus { outline: none; border-color: var(--red); }
   background: #fff; border: var(--frame); border-radius: var(--radius);
   display: flex; gap: 14px; padding: 14px; max-width: 92vw; max-height: 92vh; overflow: auto;
 }
-.modal-card img { height: min(64vh, 460px); border-radius: 10px; }
+.modal-card.wide { max-width: 96vw; width: max-content; }
+#cm-img { height: min(64vh, 460px); border-radius: 10px; }
 .modal-info { min-width: 220px; max-width: 340px; font-size: .85rem; display: flex; flex-direction: column; gap: 6px; }
 .modal-info h3 { color: var(--red); font-size: 1.1rem; }
 .modal-info table { border-collapse: collapse; width: 100%; }
@@ -346,10 +347,44 @@ select:focus, input:focus { outline: none; border-color: var(--red); }
 
 .choice-btns { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .choice-btns .btn { text-align: left; }
-.hand-preview { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 420px; }
-.hand-preview img { width: 74px; border-radius: 5px; }
+.hand-preview { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 460px; }
+.hand-preview img { width: 88px; height: auto; aspect-ratio: 63/88; object-fit: cover; border-radius: 5px; }
+/* one straight row (mulligan) — cards at natural proportion */
+.hand-preview.onerow { flex-wrap: nowrap; max-width: none; }
+.hand-preview.onerow img { width: clamp(80px, 11.5vw, 150px); }
 .pv-card { cursor: pointer; }
-img.thumb { width: 130px; border-radius: 8px; margin: 6px auto; display: block; }
+img.thumb { width: 130px; height: auto; aspect-ratio: 63/88; object-fit: cover; border-radius: 8px; margin: 6px auto; display: block; }
+
+/* ── phase banner (Yu-Gi-Oh style pop-up) ── */
+.phase-banner {
+  position: fixed; inset: 0; z-index: 140; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.phase-banner .pb-strip {
+  width: 120%; padding: 10px 0; text-align: center;
+  background: linear-gradient(180deg, rgba(150,10,10,0) 0%, rgba(170,15,15,.88) 18%, rgba(120,5,5,.94) 50%, rgba(170,15,15,.88) 82%, rgba(150,10,10,0) 100%);
+  transform: rotate(-2.5deg);
+  animation: pb-strip .45s cubic-bezier(.2,1.4,.4,1) both;
+}
+.phase-banner .pb-text {
+  font-size: clamp(2.2rem, 7vw, 4.6rem); font-weight: 900; font-style: italic;
+  color: #fff; letter-spacing: .06em; white-space: nowrap;
+  text-shadow: 0 3px 0 #7a0d0d, 0 6px 18px rgba(0,0,0,.6), 0 0 30px rgba(255,80,80,.5);
+  transform: skewX(-8deg); display: inline-block;
+  animation: pb-text .5s cubic-bezier(.2,1.6,.4,1) both;
+}
+.phase-banner .pb-sub {
+  color: #ffd9d0; font-weight: 700; font-size: clamp(.8rem, 1.8vw, 1.1rem);
+  letter-spacing: .3em; margin-top: -4px;
+}
+.phase-banner.out { animation: pb-fade .35s ease-in both; }
+@keyframes pb-strip { from { transform: rotate(-2.5deg) scaleX(0); } to { transform: rotate(-2.5deg) scaleX(1); } }
+@keyframes pb-text {
+  0% { transform: skewX(-8deg) scale(2.6); opacity: 0; }
+  60% { transform: skewX(-8deg) scale(.92); opacity: 1; }
+  100% { transform: skewX(-8deg) scale(1); }
+}
+@keyframes pb-fade { to { opacity: 0; transform: scale(1.15); } }
 
 @media (max-height: 560px) {
   .gb-bottom { height: 110px; }
@@ -374,5 +409,5 @@ img.thumb { width: 130px; border-radius: 8px; margin: 6px auto; display: block; 
 @media (max-width: 900px) {
   .db-deck { width: 220px; }
   .card-grid { grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); }
-  .modal-card img { height: 52vh; }
+  #cm-img { height: 52vh; }
 }

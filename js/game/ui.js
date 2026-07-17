@@ -20,8 +20,9 @@ const GameUI = (() => {
   const humanController = {
     isBot: false,
     async chooseMulligan(p) {
-      return await modalConfirm('มือเริ่มต้นของคุณ', renderHandPreview(p),
-        '🔄 Mulligan (จั่วใหม่)', '✔ เก็บมือนี้');
+      return await modalChoice('มือเริ่มต้นของคุณ', renderHandPreview(p, true),
+        [{ label: '✔ เก็บมือนี้', value: false }, { label: '🔄 Mulligan (จั่วใหม่)', value: true }],
+        { wide: true });
     },
     async chooseExtraDraw(p) {
       if (Engine.activeAP(p) < 1) return false;
@@ -104,9 +105,33 @@ const GameUI = (() => {
   function cardThumb(c) {
     return `<div style="text-align:center">${UAData.imgTag(c, 'thumb')}</div>`;
   }
-  function renderHandPreview(p) {
-    return `<div class="hand-preview">` + p.hand.map(no =>
+  function renderHandPreview(p, onerow = false) {
+    return `<div class="hand-preview ${onerow ? 'onerow' : ''}">` + p.hand.map(no =>
       UAData.imgTag(UAData.byNo.get(no))).join('') + `</div>`;
+  }
+
+  // ── phase banner (Yu-Gi-Oh style) ──
+  let lastBannerKey = '';
+  const BANNER_NAMES = { Start: 'DRAW PHASE', Movement: 'MOVE PHASE', Main: 'MAIN PHASE', Attack: 'ATTACK PHASE', End: 'END PHASE' };
+  function maybeShowPhaseBanner() {
+    const G = Engine.G;
+    if (!G.players.length || G.over || !G.phase) return;
+    const active = G.players[G.active];
+    const key = `${G.active}|${G.phase}|${active.turnCount}`;
+    if (key === lastBannerKey) return;
+    lastBannerKey = key;
+    const name = BANNER_NAMES[G.phase];
+    if (!name) return;
+    showPhaseBanner(name, active.isBot ? `เทิร์นของ ${active.name}` : 'เทิร์นของคุณ');
+  }
+  function showPhaseBanner(text, sub) {
+    document.querySelectorAll('.phase-banner').forEach(el => el.remove());
+    const el = document.createElement('div');
+    el.className = 'phase-banner';
+    el.innerHTML = `<div class="pb-strip"><span class="pb-text">${text}</span><div class="pb-sub">${sub || ''}</div></div>`;
+    document.body.appendChild(el);
+    setTimeout(() => el.classList.add('out'), 950);
+    setTimeout(() => el.remove(), 1350);
   }
 
   function unitHtml(u, mine) {
@@ -181,7 +206,7 @@ const GameUI = (() => {
   function hintText() {
     const map = {
       extradraw: '🃏 คลิกที่ Deck ของคุณเพื่อจั่วเพิ่ม 1 ใบ (1 AP) หรือกดปุ่มแดงเพื่อข้าม',
-      movement: '🚶 ลาก/คลิกการ์ดจาก Energy Line ขึ้น Front Line แล้วกดปุ่มแดง',
+      movement: '🚶 คลิก/ลากการ์ดของคุณเพื่อสลับ Front ⇄ Energy ได้อิสระกี่รอบก็ได้ พอใจแล้วกดปุ่มแดง',
       main: '🎴 ลากการ์ดจากมือไปวางบน line (หรือคลิกเลือก) เสร็จแล้วกดปุ่มแดง',
       attack: '⚔️ คลิก character ที่ตั้งอยู่บน Front Line เพื่อโจมตี เสร็จแล้วกดปุ่มแดง',
     };
@@ -198,6 +223,7 @@ const GameUI = (() => {
     const el = root();
     if (!el) return;
     const myTurn = G.players[G.active] === me;
+    maybeShowPhaseBanner();
 
     el.innerHTML = `
       <div class="gb-top">
@@ -364,12 +390,7 @@ const GameUI = (() => {
 
     if (d.kind === 'unit' && pendingKind === 'movement') {
       const u = Engine.findUnit(me, d.uid);
-      if (!u) return;
-      const fromEnergy = me.energy.includes(u);
-      if (line === 'front' && !fromEnergy) return;
-      if (line === 'energy' && fromEnergy) return;
-      if (line === 'energy' && !u.kw.step) { DeckBuilder.toast('ต้องมี [Step] จึงย้ายกลับ Energy Line ได้'); return; }
-      await queueMove(u, line);
+      if (u) freeMove(u, line);
     }
   }
 
@@ -391,18 +412,18 @@ const GameUI = (() => {
     }
   }
 
-  async function queueMove(u, to) {
+  // free movement during Move Phase: swap between lines instantly, unlimited times
+  function freeMove(u, to) {
     const me = Engine.G.players[0];
+    const from = me.front.includes(u) ? me.front : me.energy;
     const dest = to === 'front' ? me.front : me.energy;
-    const queued = movesBuffer.filter(m => m.to === to).length;
-    let removeUid;
-    if (dest.length + queued >= 4) {
-      removeUid = await modalChoice('ปลายทางเต็ม — เลือกใบที่จะส่งไป Removal', '',
-        [...dest.map(x => ({ label: x.card.name, value: x.uid })), { label: 'ยกเลิก', value: null }]);
-      if (removeUid == null) return;
-    }
-    movesBuffer.push({ uid: u.uid, to, removeUid });
-    DeckBuilder.toast(`คิวย้าย ${u.card.name} → ${to === 'front' ? 'Front' : 'Energy'} Line (กดปุ่มแดงเพื่อยืนยัน)`);
+    if (from === dest) return;
+    if (u.card.type !== 'Character') { DeckBuilder.toast('Site ย้ายไม่ได้'); return; }
+    if (dest.length >= 4) { DeckBuilder.toast('ปลายทางเต็ม (4 ใบ) — ย้ายใบอื่นออกก่อน'); return; }
+    from.splice(from.indexOf(u), 1);
+    dest.push(u);
+    Engine.log(`คุณ ย้าย ${u.card.name} ไป ${to === 'front' ? 'Front' : 'Energy'} Line`);
+    render();
   }
 
   // ---------- click interactions ----------
@@ -459,15 +480,10 @@ const GameUI = (() => {
     if (!mine) { showCardModal(u.no); return; }
 
     if (pendingKind === 'movement') {
+      // one click = instantly swap line (move freely, any number of times)
+      if (u.card.type !== 'Character') { showCardModal(u.no); return; }
       const inEnergy = me.energy.includes(u);
-      const opts = [];
-      if (inEnergy && u.card.type === 'Character') opts.push({ label: '⬆ ย้ายไป Front Line', value: 'front' });
-      if (!inEnergy && u.kw.step) opts.push({ label: '⬇ [Step] ย้ายไป Energy Line', value: 'energy' });
-      opts.push({ label: '🔍 ดูการ์ด', value: 'view' });
-      opts.push({ label: 'ยกเลิก', value: null });
-      const v = await modalChoice(u.card.name, cardThumb(u.card), opts);
-      if (v === 'view') { showCardModal(u.no); return; }
-      if (v === 'front' || v === 'energy') await queueMove(u, v);
+      freeMove(u, inEnergy ? 'front' : 'energy');
       return;
     }
 
@@ -522,11 +538,11 @@ const GameUI = (() => {
   }
 
   // ---------- generic modals ----------
-  function modalChoice(title, bodyHtml, buttons) {
+  function modalChoice(title, bodyHtml, buttons, opts = {}) {
     return new Promise(res => {
       const wrap = document.createElement('div');
       wrap.className = 'modal';
-      wrap.innerHTML = `<div class="modal-card" style="flex-direction:column;max-width:460px;max-height:88vh;overflow:auto">
+      wrap.innerHTML = `<div class="modal-card ${opts.wide ? 'wide' : ''}" style="flex-direction:column;${opts.wide ? '' : 'max-width:460px;'}max-height:88vh;overflow:auto">
         <h3 style="color:var(--red)">${title}</h3>
         ${bodyHtml || ''}
         <div class="choice-btns">${buttons.map((b, i) =>
