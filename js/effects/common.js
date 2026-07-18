@@ -14,27 +14,42 @@
 
   // ---------- shared action helpers (used by generic patterns and per-card scripts) ----------
 
+  // "Outside Area" (per card text) is the Sideline zone — NOT the Removal Area. The Removal
+  // Area is a separate, genuinely permanent zone only used for hand-limit discard, evicting a
+  // full line, and any card text that explicitly says "Remove Area".
   async function discardFromHand(p, title) {
     if (!p.hand.length) return null;
-    const i = await p.controller.chooseCardFromHand(p, title || 'เลือกการ์ดจากมือไป Removal');
+    const i = await p.controller.chooseCardFromHand(p, title || 'เลือกการ์ดจากมือไป Outside Area (Sideline)');
     if (i == null) return null;
     const no = p.hand.splice(i, 1)[0];
-    p.removal.push(no);
-    log(`${p.name} ส่ง ${UAData.byNo.get(no)?.name} จากมือไป Removal`);
+    p.sideline.push(no);
+    log(`${p.name} ส่ง ${UAData.byNo.get(no)?.name} จากมือไป Outside Area (Sideline)`);
     return no;
   }
 
-  // look at the top card of the deck, then place it per one of `places`: 'top'|'bottom'|'removal'
+  // genuinely permanent Removal Area — only for card text that explicitly says "Remove Area"
+  // (rare) or "[Discard N]" activation costs, as opposed to "Outside Area" (Sideline).
+  async function manualDiscardToRemoval(p, title) {
+    if (!p.hand.length) return null;
+    const i = await p.controller.chooseCardFromHand(p, title || 'เลือกการ์ดจากมือไป Removal Area');
+    if (i == null) return null;
+    const no = p.hand.splice(i, 1)[0];
+    p.removal.push(no);
+    log(`${p.name} ส่ง ${UAData.byNo.get(no)?.name} จากมือไป Removal Area (ถาวร)`);
+    return no;
+  }
+
+  // look at the top card of the deck, then place it per one of `places`: 'top'|'bottom'|'outside'
   async function scryTop(p, places) {
     if (!p.deck.length) return;
     const top = p.deck[0];
     const c = UAData.byNo.get(top);
-    const labels = { top: '⬆ วางไว้บนเด็คเหมือนเดิม', bottom: '⬇ วางใต้เด็ค', removal: '❌ ส่งไป Removal' };
+    const labels = { top: '⬆ วางไว้บนเด็คเหมือนเดิม', bottom: '⬇ วางใต้เด็ค', outside: '❌ ส่งไป Outside Area (Sideline)' };
     const opts = places.map(v => ({ label: labels[v], value: v }));
     const body = !p.controller.isBot ? `<div style="text-align:center">${UAData.imgTag(c, 'thumb')}</div>` : '';
     const v = await p.controller.chooseOption(p, `การ์ดบนสุดของเด็ค: ${c?.name}`, opts, body);
     if (v === 'bottom') { p.deck.push(p.deck.shift()); log(`${p.name} ย้ายการ์ดบนเด็คไปใต้เด็ค`); }
-    else if (v === 'removal') { p.removal.push(p.deck.shift()); log(`${p.name} ส่งการ์ดบนเด็คไป Removal`); }
+    else if (v === 'outside') { p.sideline.push(p.deck.shift()); log(`${p.name} ส่งการ์ดบนเด็คไป Outside Area (Sideline)`); }
     else log(`${p.name} เก็บการ์ดไว้บนเด็คเหมือนเดิม`);
   }
 
@@ -116,12 +131,12 @@
     return unit;
   }
 
-  // fetch a card from Removal/Outside Area straight to hand (very common "add ... from your
-  // Outside Area to your hand" wording)
-  async function fetchFromRemoval(p, predicate, title) {
-    const i = await p.controller.chooseCardFromRemoval(p, title || 'เลือกการ์ดจาก Outside Area เข้ามือ', predicate);
+  // fetch a card from the Outside Area (= Sideline) straight to hand — very common "add ... from
+  // your Outside Area to your hand" wording.
+  async function fetchFromSideline(p, predicate, title) {
+    const i = await p.controller.chooseCardFromSideline(p, title || 'เลือกการ์ดจาก Outside Area เข้ามือ', predicate);
     if (i == null) return null;
-    const no = p.removal.splice(i, 1)[0];
+    const no = p.sideline.splice(i, 1)[0];
     p.hand.push(no);
     log(`${p.name}: เพิ่ม ${UAData.byNo.get(no)?.name} จาก Outside Area เข้ามือ`);
     return no;
@@ -138,18 +153,20 @@
   }
 
   window.UAEffectHelpers = {
-    discardFromHand, scryTop, lookTopAndTake, buffOwnCharacter, debuffEnemyFront,
-    restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther, fetchFromRemoval,
-    countNoTrigger, hasCardNamed, hasCardOfColor,
+    discardFromHand, manualDiscardToRemoval, scryTop, lookTopAndTake, buffOwnCharacter,
+    debuffEnemyFront, restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther,
+    fetchFromSideline, countNoTrigger, hasCardNamed, hasCardOfColor,
   };
 
   // ---------- generic text-pattern layer ----------
+  // Card text wording varies a lot across the ~10k cards in this game (different
+  // prepositions, "that card"/"it", trailing periods vs commas, even outright typos
+  // in the source data). Rather than one fragile anchored regex per pattern, these
+  // matchers key off a handful of unambiguous fragments so minor wording drift
+  // doesn't silently break the whole pattern.
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+) cards?\.?$/i,
-    onplayDrawDiscard: /^\[On Play\]\s*Draw (\d+) cards?,\s*place (\d+) cards? from your hand (?:in)?to the Outside Area\.?$/i,
     apActive: /^Choose up to (\d+) of your AP cards and set them to active\.?$/i,
-    scryTopRemoval: /^\[On Play\]\s*Look at the top card of your deck,? place it on (?:the )?top of your deck or to the Outside Area\.?$/i,
-    scryTopBottom: /^\[On Play\]\s*Look at the top card of your deck,? place it on the top o[fr] bottom of your deck\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it gets \+(\d+) BP during this turn\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line, it gets -(\d+) BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line and rest it\.?$/i,
@@ -157,24 +174,69 @@
   };
 
   function firstLine(fx) { return (fx || '').split('@')[0].trim(); }
+  // Some cards list a passive clause BEFORE their "[On Play]"/etc. clause (joined by '@'), so the
+  // relevant clause isn't always segment 0 — find whichever '@'-separated segment actually starts
+  // with the given marker.
+  function findClause(fx, markerRegex) {
+    const segs = (fx || '').split('@').map(s => s.trim());
+    return segs.find(s => markerRegex.test(s)) || null;
+  }
+  // same idea, but returns the regex match result from whichever segment matches (for patterns
+  // without a fixed bracket-marker prefix, like the AP-untap event text).
+  function findMatch(fx, regex) {
+    for (const s of (fx || '').split('@').map(s => s.trim())) {
+      const m = s.match(regex);
+      if (m) return m;
+    }
+    return null;
+  }
+
+  // "[On Play] Draw N card(s), place/put/discard M card(s) from your hand to the Outside
+  // Area/Remove Area." — extremely common, but with many small wording variants.
+  function matchDrawDiscard(fx) {
+    const m = fx.match(/^\[On Play\]\s*Draw (\d+) cards?,\s*(.*)$/i);
+    if (!m) return null;
+    const rest = m[2];
+    const dm = rest.match(/(?:place|put|discard)\s+(\d+)\s+cards?/i);
+    if (!dm) return null;
+    return { drawN: parseInt(m[1]), discardN: parseInt(dm[1]), toRemoval: /remove area/i.test(rest) };
+  }
+
+  // "[On Play] Look at the top card of your deck ... place (that card/it) ... top of your deck
+  // or (to/on) (your/the) Outside Area." — top-or-outside variant.
+  function matchScryTopOutside(fx) {
+    if (!/^\[On Play\]\s*Look at the top card of your deck/i.test(fx)) return null;
+    if (!/outside area/i.test(fx) || /top or bottom|bottom of/i.test(fx)) return null;
+    return true;
+  }
+  // ... or "top or bottom of your deck" — top-or-bottom variant.
+  function matchScryTopBottom(fx) {
+    if (!/^\[On Play\]\s*Look at the top card of your deck/i.test(fx)) return null;
+    if (!/top or bottom|top of[^.]*bottom/i.test(fx)) return null;
+    return true;
+  }
 
   const origOnPlay = Effects.onPlay.bind(Effects);
   Effects.onPlay = async function (G, p, unit) {
     if (unit.card.trigger === 'Get') p._getPlayedThisTurn = true; // tracked for "if a [Get] character was played this turn" cards
     if (this.registry[unit.no]?.onPlay) return origOnPlay(G, p, unit);
-    const fx = firstLine(unit.card.effect);
-    let m;
+    const fx = findClause(unit.card.effect, /^\[On Play\]/i);
+    if (!fx) return;
+    let m, dd;
     if ((m = fx.match(RX.onplayDraw))) {
       draw(p, parseInt(m[1]));
       log(`[On Play] ${unit.card.name}: ${p.name} จั่ว ${m[1]} ใบ`);
-    } else if ((m = fx.match(RX.onplayDrawDiscard))) {
-      draw(p, parseInt(m[1]));
-      log(`[On Play] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
-      for (let i = 0; i < parseInt(m[2]); i++) await discardFromHand(p);
-    } else if (fx.match(RX.scryTopRemoval)) {
+    } else if ((dd = matchDrawDiscard(fx))) {
+      draw(p, dd.drawN);
+      log(`[On Play] ${unit.card.name}: จั่ว ${dd.drawN} ใบ`);
+      for (let i = 0; i < dd.discardN; i++) {
+        if (dd.toRemoval) await manualDiscardToRemoval(p);
+        else await discardFromHand(p);
+      }
+    } else if (matchScryTopOutside(fx)) {
       log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุดของเด็ค`);
-      await scryTop(p, ['top', 'removal']);
-    } else if (fx.match(RX.scryTopBottom)) {
+      await scryTop(p, ['top', 'outside']);
+    } else if (matchScryTopBottom(fx)) {
       log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุดของเด็ค`);
       await scryTop(p, ['top', 'bottom']);
     } else if ((m = fx.match(RX.onplayBuffOther))) {
@@ -193,7 +255,7 @@
     if (this.registry[card.no]?.onEvent) return origOnEvent(G, p, card);
     const fx = firstLine(card.effect);
     let m;
-    if ((m = fx.match(RX.apActive))) {
+    if ((m = findMatch(card.effect, RX.apActive))) {
       await apUntap(p, parseInt(m[1]));
     } else {
       log(`Event ${card.name}: ${fx} (ทำ effect ตามการ์ด — manual)`);

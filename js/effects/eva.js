@@ -38,9 +38,9 @@
       const discarded = await H.discardFromHand(p, 'จะทิ้ง 1 ใบเพื่อเรียก Rei Ayanami กลับไหม? (ไม่บังคับ)');
       if (!discarded) return;
       const pred = c => c && c.color === 'Yellow' && (c.name || '').includes('Rei Ayanami') && (c.need || 0) <= 2;
-      const idx = await p.controller.chooseCardFromRemoval(p, 'เลือก Rei Ayanami (Energy 2 หรือน้อยกว่า) กลับสนาม (Active)', pred);
+      const idx = await p.controller.chooseCardFromSideline(p, 'เลือก Rei Ayanami (Energy 2 หรือน้อยกว่า) กลับสนาม (Active)', pred);
       if (idx == null) return;
-      await Engine.playCardFromZone(p, p.removal[idx], 'removal', { line: 'energy', active: true });
+      await Engine.playCardFromZone(p, p.sideline[idx], 'sideline', { line: 'energy', active: true });
     },
   };
 
@@ -146,7 +146,7 @@
     async onPlay(G, p, unit) {
       const discarded = await H.discardFromHand(p, 'ทิ้ง 1 ใบเพื่อดึงการ์ด Yellow (Energy≤3) จาก Outside Area? (ไม่บังคับ)');
       if (!discarded) return;
-      await H.fetchFromRemoval(p, c => c && c.color === 'Yellow' && c.type === 'Character' && (c.need || 0) <= 3,
+      await H.fetchFromSideline(p, c => c && c.color === 'Yellow' && c.type === 'Character' && (c.need || 0) <= 3,
         'เลือก Character สี Yellow (Energy 3 หรือน้อยกว่า)');
     },
   };
@@ -190,7 +190,7 @@
     async onMain(G, p, unit) {
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;
-      if (p.deck.length) { p.removal.push(p.deck.shift()); log(`${unit.card.name}: ส่งการ์ดบนสุดของเด็คไป Outside Area`); }
+      if (p.deck.length) { p.sideline.push(p.deck.shift()); log(`${unit.card.name}: ส่งการ์ดบนสุดของเด็คไป Outside Area`); }
     },
   };
 
@@ -220,16 +220,16 @@
       const handIdx = p.hand.findIndex(no => matches(byNo(no)));
       if (handIdx >= 0) {
         const opts = [{ label: `ลง ${byNo(p.hand[handIdx]).name} จากมือ`, value: 'hand' }, { label: 'ข้าม', value: null }];
-        const removalHas = p.removal.some(no => matches(byNo(no)));
-        if (removalHas) opts.splice(1, 0, { label: 'ลงจาก Outside Area แทน', value: 'removal' });
+        const sidelineHas = p.sideline.some(no => matches(byNo(no)));
+        if (sidelineHas) opts.splice(1, 0, { label: 'ลงจาก Outside Area แทน', value: 'sideline' });
         const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือกแหล่งการ์ด`, opts);
         if (v === 'hand') { await Engine.playCardFromZone(p, p.hand[handIdx], 'hand', { line: 'energy', active: false }); return; }
-        if (v !== 'removal') return;
+        if (v !== 'sideline') return;
       }
-      const idx = await p.controller.chooseCardFromRemoval(p, `เลือกการ์ด Purple (Rei Tentative/Kaworu/Field, Energy≤2) จาก Outside Area`, matches);
+      const idx = await p.controller.chooseCardFromSideline(p, `เลือกการ์ด Purple (Rei Tentative/Kaworu/Field, Energy≤2) จาก Outside Area`, matches);
       if (idx == null) return;
-      const no = p.removal[idx];
-      const played = await Engine.playCardFromZone(p, no, 'removal', { line: 'energy', active: false });
+      const no = p.sideline[idx];
+      const played = await Engine.playCardFromZone(p, no, 'sideline', { line: 'energy', active: false });
       if (played) await H.discardFromHand(p);
     },
   };
@@ -280,7 +280,7 @@
       if (unit._usedThisTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
       const idx = p.hand.findIndex(no => (byNo(no)?.traits || '').includes('WILLE'));
       if (idx < 0) { p.controller.notify?.('ไม่มีการ์ด Trait: WILLE ในมือ'); return; }
-      p.removal.push(p.hand.splice(idx, 1)[0]);
+      p.sideline.push(p.hand.splice(idx, 1)[0]);
       unit._usedThisTurn = Engine.G.turn;
       await H.debuffEnemyFront(p, -1000);
     },
@@ -291,10 +291,10 @@
     async onMain(G, p, unit) {
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       const pred = c => c && ((c.name || '').includes('Shinji Ikari') || (c.traits || '').includes('WILLE'));
-      const idx = await p.controller.chooseCardFromRemoval(p, 'เลือก Shinji Ikari หรือการ์ด Trait:WILLE จาก Outside Area', pred);
+      const idx = await p.controller.chooseCardFromSideline(p, 'เลือก Shinji Ikari หรือการ์ด Trait:WILLE จาก Outside Area', pred);
       if (idx == null) return;
       await Engine.sidelineUnit(p, unit, 'effect');
-      const no = p.removal[idx]; p.removal.splice(idx, 1); p.hand.push(no);
+      const no = p.sideline[idx]; p.sideline.splice(idx, 1); p.hand.push(no);
       log(`${unit.card.name}: เพิ่ม ${byNo(no)?.name} เข้ามือ`);
     },
   };
@@ -311,12 +311,12 @@
   reg['UA44BT-EVA-1-057'] = {
     async onAttack(G, p, unit) {
       const pred = c => c && c.color === 'Purple' && (c.name || '').includes('Shinji Ikari') && (c.need || 0) <= 3 && (c.ap || 0) === 1;
-      if (!p.removal.some(no => pred(byNo(no)))) return;
+      if (!p.sideline.some(no => pred(byNo(no)))) return;
       const discarded = await H.discardFromHand(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อเรียก Shinji Ikari จาก Outside Area? (ไม่บังคับ)`);
       if (!discarded) return;
-      const idx = await p.controller.chooseCardFromRemoval(p, 'เลือก Shinji Ikari (Purple, Energy≤3, AP1)', pred);
+      const idx = await p.controller.chooseCardFromSideline(p, 'เลือก Shinji Ikari (Purple, Energy≤3, AP1)', pred);
       if (idx == null) return;
-      await Engine.playCardFromZone(p, p.removal[idx], 'removal', { line: 'energy', active: false });
+      await Engine.playCardFromZone(p, p.sideline[idx], 'sideline', { line: 'energy', active: false });
     },
   };
 
@@ -334,7 +334,7 @@
     },
     async onSideline(G, p, unit, reason) {
       if (reason === 'battle') return;
-      await H.fetchFromRemoval(p, c => c && c.type === 'Character', `${unit.card.name}: เลือก Character จาก Outside Area เข้ามือ`);
+      await H.fetchFromSideline(p, c => c && c.type === 'Character', `${unit.card.name}: เลือก Character จาก Outside Area เข้ามือ`);
       if (Engine.G.players[Engine.G.active] === p) {
         const yes = await p.controller.chooseOption(p, `${unit.card.name}: ตั้ง AP กลับมา Active 1 ใบไหม?`,
           [{ label: 'ตั้ง AP', value: true }, { label: 'ไม่', value: false }]);
@@ -360,9 +360,9 @@
   reg['UA44BT-EVA-1-062'] = {
     async onEvent(G, p, card) {
       const pred = c => c && c.color === 'Purple' && (c.name || '').includes('Shinji Ikari');
-      const idx = await p.controller.chooseCardFromRemoval(p, 'เลือก Shinji Ikari (Purple) จาก Outside Area', pred);
+      const idx = await p.controller.chooseCardFromSideline(p, 'เลือก Shinji Ikari (Purple) จาก Outside Area', pred);
       if (idx == null) return;
-      await Engine.playCardFromZone(p, p.removal[idx], 'removal', { line: 'energy', active: false });
+      await Engine.playCardFromZone(p, p.sideline[idx], 'sideline', { line: 'energy', active: false });
     },
   };
 
@@ -480,7 +480,7 @@
       const revealed = p.deck.splice(0, n);
       const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: ดูการ์ดบนสุด 2 ใบ (เลือกส่ง Outside Area ได้ 1 ใบ ต้องไม่มี Trigger)`,
         c => !c.trigger, 1);
-      picked.sort((a, b) => b - a).forEach(i => { p.removal.push(revealed.splice(i, 1)[0]); log(`${unit.card.name}: ส่ง ${byNo(p.removal[p.removal.length - 1])?.name} ไป Outside Area`); });
+      picked.sort((a, b) => b - a).forEach(i => { p.sideline.push(revealed.splice(i, 1)[0]); log(`${unit.card.name}: ส่ง ${byNo(p.sideline[p.sideline.length - 1])?.name} ไป Outside Area`); });
       p.deck.unshift(...revealed);
     },
   };
@@ -542,9 +542,9 @@
       const discarded = await H.discardFromHand(p, 'ทิ้ง 1 ใบเพื่อเรียก Rei Ayanami (Red, Energy≤1) จาก Outside Area? (ไม่บังคับ)');
       if (!discarded) return;
       const pred = c => c && c.color === 'Red' && (c.name || '').includes('Rei Ayanami') && (c.need || 0) <= 1;
-      const idx = await p.controller.chooseCardFromRemoval(p, 'เลือก Rei Ayanami (Red, Energy≤1)', pred);
+      const idx = await p.controller.chooseCardFromSideline(p, 'เลือก Rei Ayanami (Red, Energy≤1)', pred);
       if (idx == null) return;
-      await Engine.playCardFromZone(p, p.removal[idx], 'removal', { line: 'energy', active: false });
+      await Engine.playCardFromZone(p, p.sideline[idx], 'sideline', { line: 'energy', active: false });
     },
   };
 

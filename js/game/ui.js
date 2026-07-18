@@ -113,13 +113,24 @@ const GameUI = (() => {
       }
       return picked;
     },
-    // pick 1 card from Removal/Outside Area matching a predicate, or null to skip
+    // pick 1 card from the (permanent) Removal Area matching a predicate, or null to skip
     async chooseCardFromRemoval(p, title, predicate) {
       const idxs = p.removal.map((no, i) => i).filter(i => !predicate || predicate(UAData.byNo.get(p.removal[i])));
       if (!idxs.length) return null;
       const btns = idxs.map(i => {
         const c = UAData.byNo.get(p.removal[i]);
         return { label: c?.name || p.removal[i], value: i };
+      });
+      btns.push({ label: 'ไม่เลือก', value: null });
+      return await modalChoice(title, '', btns);
+    },
+    // pick 1 card from the Sideline (a.k.a. "Outside Area" in card text) matching a predicate
+    async chooseCardFromSideline(p, title, predicate) {
+      const idxs = p.sideline.map((no, i) => i).filter(i => !predicate || predicate(UAData.byNo.get(p.sideline[i])));
+      if (!idxs.length) return null;
+      const btns = idxs.map(i => {
+        const c = UAData.byNo.get(p.sideline[i]);
+        return { label: c?.name || p.sideline[i], value: i };
       });
       btns.push({ label: 'ไม่เลือก', value: null });
       return await modalChoice(title, '', btns);

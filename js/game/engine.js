@@ -423,7 +423,7 @@ const Engine = (() => {
     } else return;
 
     // stack: raider on top, target (and its stack) beneath
-    if (target.counters.length) { p.removal.push(...target.counters); target.counters = []; }
+    if (target.counters.length) { p.sideline.push(...target.counters); target.counters = []; }
     raider.under = [target.no, ...target.under];
     raider.rested = false;           // if resting -> active (raider arrives active per rule: switch to active)
     targetLine[ti] = raider;
@@ -666,7 +666,7 @@ const Engine = (() => {
     }
     if (!targetLine) { p.hand.push(c.no); return; }
     const target = targetLine[ti];
-    if (target.counters.length) { p.removal.push(...target.counters); target.counters = []; }
+    if (target.counters.length) { p.sideline.push(...target.counters); target.counters = []; }
     const raider = makeUnit(c.no);
     raider.under = [target.no, ...target.under];
     raider.rested = false;
@@ -708,7 +708,7 @@ const Engine = (() => {
   async function removeToArea(p, unit, area) {
     for (const c of unit.under) p.sideline.push(c);
     unit.under = [];
-    if (unit.counters.length) { p.removal.push(...unit.counters); unit.counters = []; }
+    if (unit.counters.length) { p.sideline.push(...unit.counters); unit.counters = []; }
     p[area].push(unit.no);
     await Effects.onLeaveField(G, p, unit);
     if (area === 'sideline') await Effects.onSideline(G, p, unit, 'effect');
@@ -723,7 +723,7 @@ const Engine = (() => {
     }
     for (const c of unit.under) owner.sideline.push(c);
     unit.under = [];
-    if (unit.counters.length) { owner.removal.push(...unit.counters); unit.counters = []; }
+    if (unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
     owner.sideline.push(unit.no);
     await Effects.onLeaveField(G, owner, unit);
     await Effects.onSideline(G, owner, unit, reason);
@@ -737,7 +737,7 @@ const Engine = (() => {
     }
     for (const c of unit.under) owner.sideline.push(c);
     unit.under = [];
-    if (unit.counters.length) { owner.removal.push(...unit.counters); unit.counters = []; }
+    if (unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
     owner.hand.push(unit.no);
     await Effects.onLeaveField(G, owner, unit);
   }
@@ -786,7 +786,8 @@ const Engine = (() => {
     const u = makeUnit(no);
     u.rested = !active;
     dest.push(u);
-    log(`${owner.name}: ${c.name} ถูกนำลง ${line === 'front' ? 'Front' : 'Energy'} Line จาก${zone === 'hand' ? 'มือ' : 'Outside Area'}`);
+    const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : 'Removal';
+    log(`${owner.name}: ${c.name} ถูกนำลง ${line === 'front' ? 'Front' : 'Energy'} Line จาก${zoneLabel}`);
     await Effects.onPlay(G, owner, u);
     return u;
   }

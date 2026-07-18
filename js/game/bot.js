@@ -188,6 +188,11 @@ function makeBotController() {
       return idx >= 0 ? idx : null;
     },
 
+    async chooseCardFromSideline(p, title, predicate) {
+      const idx = p.sideline.findIndex((no) => !predicate || predicate(UAData.byNo.get(no)));
+      return idx >= 0 ? idx : null;
+    },
+
     async chooseRevealPick(p, revealedNos, title, predicate, maxPick) {
       const picked = [];
       revealedNos.forEach((no, i) => {
