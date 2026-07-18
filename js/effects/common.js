@@ -186,7 +186,7 @@
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it gets|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it (?:gets|gains)|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
@@ -308,9 +308,10 @@
   // "[On Play] Play up to 1 <criteria> card with required energy of N or less (and AP cost of 1)
   //  from your hand to your area (as) rested."
   function matchFreePlayFromHand(fx) {
-    const m = fx.match(/^\[On Play\]\s*Play up to 1 (.+?) (?:card )?with (?:a )?required energy of (\d+) or less(?: and (?:an? )?AP cost of (\d+))? from your hand to your area,? (?:as )?rested\.?$/i);
+    const m = fx.match(/^\[On Play\]\s*Play up to 1 (.+?) (?:card )?with (?:a )?(?:required energy|energy cost) of (\d+) or less(?: and (?:an? )?AP(?: cost(?: of)?)? (\d+))? from your hand to your (area|Front Line|Energy Line),? (?:as )?rested\.?$/i);
     if (!m) return null;
-    return { criteria: m[1], maxNeed: parseInt(m[2]), apCost: m[3] ? parseInt(m[3]) : null };
+    return { criteria: m[1], maxNeed: parseInt(m[2]), apCost: m[3] ? parseInt(m[3]) : null,
+             line: /front/i.test(m[4]) ? 'front' : 'energy' };
   }
 
   // "[On Play] You may place 1 card from your hand to the Outside Area. If you did, add up to 1
@@ -423,7 +424,7 @@
         const c = UAData.byNo.get(p.hand[idx]);
         const opt = await p.controller.chooseOption(p, `${unit.card.name}: ลง ${c.name} ลงสนามฟรีไหม?`,
           [{ label: `ลง ${c.name} (rested)`, value: true }, { label: 'ข้าม', value: false }]);
-        if (opt) await Engine.playCardFromZone(p, p.hand[idx], 'hand', { line: 'energy', active: false });
+        if (opt) await Engine.playCardFromZone(p, p.hand[idx], 'hand', { line: dd.line || 'energy', active: false });
       }
     } else if ((dd = matchDiscardFetch(fx))) {
       const pred = buildCardPredicate(dd.criteria);
@@ -435,6 +436,10 @@
     } else if ((dd = matchFetchOutside(fx))) {
       const pred = buildCardPredicate(dd.criteria);
       await fetchFromSideline(p, c => c && pred(c), `${unit.card.name}: เลือกการ์ดจาก Outside Area เข้ามือ`);
+    } else if ((m = fx.match(/^\[On Play\]\s*If a character was retired during this turn, draw (\d+)(?: cards?)?\.?$/i))) {
+      if (Engine.G.retiredThisTurn) { draw(p, parseInt(m[1])); log(`[On Play] ${unit.card.name}: จั่ว ${m[1]} ใบ`); }
+    } else if ((m = fx.match(/^\[On Play\]\s*If a character was retired during this turn, choose (?:up to )?1 character (?:on|from) your opponent'?s Front Line, it gets -(\d+) ?BP during this turn\.?$/i))) {
+      if (Engine.G.retiredThisTurn) await debuffEnemyFront(p, -parseInt(m[1]));
     }
   };
 
@@ -445,6 +450,12 @@
     const fx = findClause(unit.card.effect, /^\[When Attacking\]/i);
     if (!fx) return;
     let m;
+    // "[When Attacking] Draw N card(s)." — plain draw
+    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+)(?: cards?)?\.?$/i))) {
+      draw(p, parseInt(m[1]));
+      log(`[When Attacking] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
+      return;
+    }
     // "[When Attacking] Draw N card(s), place M card(s) from your hand to the Outside Area."
     if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,\s*(?:place|put) (\d+) cards? from your hand/i))) {
       draw(p, parseInt(m[1]));
@@ -670,7 +681,21 @@
     if (reason === 'battle') return;
     const fx = findClause(unit.card.effect, /^\[On Retire\]/i);
     if (!fx) return;
-    const m = fx.match(RX.onRetireDraw);
-    if (m) { draw(p, parseInt(m[1])); log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`); }
+    let m = fx.match(RX.onRetireDraw);
+    if (m) { draw(p, parseInt(m[1])); log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`); return; }
+    // "[On Retire] Draw N card(s), place M card(s) from your hand to the Outside Area."
+    if ((m = fx.match(/^\[On Retire\]\s*Draw (\d+)(?: cards?)?(?:,| and| then|, then)\s*(?:place|put) (\d+) cards? from your hand/i))) {
+      draw(p, parseInt(m[1]));
+      log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
+      const toRemoval = /remove area/i.test(fx);
+      for (let i = 0; i < parseInt(m[2]); i++) {
+        if (toRemoval) await manualDiscardToRemoval(p); else await discardFromHand(p);
+      }
+      return;
+    }
+    // "[On Retire] Choose 1 character on your opponent's Front Line and rest it."
+    if (/^\[On Retire\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line and rest it\.?$/i.test(fx)) {
+      await restEnemyFront(p);
+    }
   };
 })();

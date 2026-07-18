@@ -181,7 +181,7 @@ const Engine = (() => {
     if (m) delta -= parseInt(m[1]);
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
-    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? card on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by (\d+)|reduce the energy requirement of this card in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
+    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
@@ -300,6 +300,7 @@ const Engine = (() => {
     for (const u of [...p.front, ...p.energy]) u.bpPersist = 0;
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
+    G.retiredThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
@@ -788,6 +789,7 @@ const Engine = (() => {
   // finds & removes `unit` from owner's front/energy line, sends it to Sideline.
   // reason: 'battle' | 'effect' | 'bp0'
   async function sidelineUnit(owner, unit, reason = 'effect') {
+    G.retiredThisTurn = (G.retiredThisTurn || 0) + 1; // tracked for "if a character was retired this turn" cards
     for (const line of [owner.front, owner.energy]) {
       const i = line.indexOf(unit);
       if (i >= 0) line.splice(i, 1);
