@@ -92,9 +92,10 @@
     return u;
   }
 
-  async function restEnemyFront(p) {
+  async function restEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested);
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested &&
+      (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, 'เลือก character ศัตรูให้วางนอน', true);
     const u = units.find(x => x.uid === uid);
@@ -182,7 +183,7 @@
     apActive: /^Choose up to (\d+) of your? AP [Cc]ards and (?:(?:set|switch) (?:it|them) to active|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it (?:gets|gains) \+(\d+) BP during this turn\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line, it gets -(\d+) BP during this turn\.?$/i,
-    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line and rest it\.?$/i,
+    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it gets|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
@@ -206,7 +207,11 @@
     t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
     t = t.replace(/\ba card\b/gi, '1 card');
     t = t.replace(/\buntil the end of the turn\b/gi, 'during this turn');
+    t = t.replace(/(\d)BP\b/g, '$1 BP');                      // "+1000BP" / "3000BP or less" -> spaced
     t = t.replace(/\b(gains|gets) (\d+) ?BP\b/gi, '$1 +$2 BP');
+    t = t.replace(/\bwith (\d+) BP or (less|more)\b/gi, 'with BP $1 or $2');
+    t = t.replace(/\bput it to rest\b/gi, 'rest it');
+    t = t.replace(/\bFrontline\b/g, 'Front Line');
     t = t.replace(/\bwith (\d+) or (less|more|lower|higher) required energy\b/gi, 'with required energy of $1 or $2');
     t = t.replace(/\binto (?:your|the) Outside Area\b/gi, 'to the Outside Area');
     t = t.replace(/\b(?:on|in) your field\b/gi, 'on your area');
@@ -396,8 +401,8 @@
       await buffOwnCharacter(p, parseInt(m[2]), { excludeUnit: m[1] ? unit : null });
     } else if ((m = fx.match(RX.onplayDebuffEnemy))) {
       await debuffEnemyFront(p, -parseInt(m[1]));
-    } else if (fx.match(RX.onplayRestEnemy)) {
-      await restEnemyFront(p);
+    } else if ((m = fx.match(RX.onplayRestEnemy))) {
+      await restEnemyFront(p, m[1] ? parseInt(m[1]) : null);
     } else if ((m = fx.match(RX.bounceSelfOrOther))) {
       await bounceSelfOrOther(p, unit, parseInt(m[1]));
     } else if ((rc = matchRetireEnemyConditional(fx))) {
@@ -604,6 +609,12 @@
     if (/^\[Main\]\s*\[Rest this card\]\s*Look at (?:the top card|1 card from the top|the top 1 cards?) of your deck/i.test(fx) &&
         /top or bottom|top of[^.]*bottom/i.test(fx))
       return { kind: 'restScryTopBottom' };
+    // "[Main] [Pay N AP] [1 Per Turn] Draw N card(s)."
+    if ((m = fx.match(/^\[Main\]\s*\[Pay (\d+) AP\]\s*\[1 Per Turn\]\s*Draw (\d+)(?: cards?)?\.?$/i)))
+      return { kind: 'payApDraw', ap: parseInt(m[1]), drawN: parseInt(m[2]) };
+    // "[Main] [Rest this card] Choose 1 character on your opponent's Front Line, it gets -N BP during this turn"
+    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 (?:character on your opponent'?s Front Line|of your opponent'?s Front Line [Cc]haracters?),? it gets -(\d+) ?BP during this turn\.?$/i)))
+      return { kind: 'restDebuffEnemy', n: parseInt(m[1]) };
     return null;
   }
 
@@ -633,6 +644,16 @@
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;
       await scryTop(p, ['top', 'bottom']);
+    } else if (mm.kind === 'payApDraw') {
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (!Engine.payAP(p, mm.ap)) { p.controller.notify?.('AP ไม่พอ'); return; }
+      unit._usedTurn = Engine.G.turn;
+      draw(p, mm.drawN);
+      log(`${unit.card.name}: จ่าย ${mm.ap} AP จั่ว ${mm.drawN} ใบ`);
+    } else if (mm.kind === 'restDebuffEnemy') {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      await debuffEnemyFront(p, -mm.n);
     }
   };
 

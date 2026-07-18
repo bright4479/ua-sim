@@ -34,6 +34,9 @@ const Engine = (() => {
       if (t.startsWith('<')) kw.raidTargets.push({ kind: 'name', value: t.slice(1, -1).trim() });
       else kw.raidTargets.push({ kind: 'trait', value: t.slice(1, -1).trim() });
     }
+    // wording variants: "Play this field (to your area) in active." / "Play this site set to
+    // active." / "Play this character set to active."
+    if (/Play this (?:field|site|character|card) (?:to your area )?(?:in active|set to active)/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)
     if (/(?:this character|this field|this card) is played in active/i.test(fx)) {
       const nameCond = fx.match(/If there is a character on your area that includes <([^>]+)> in its name, (?:this character|this field) is played in active/i);
@@ -42,9 +45,9 @@ const Engine = (() => {
       else if (traitCond) kw.entersActiveIf = { kind: 'traitCount', n: parseInt(traitCond[1]), trait: traitCond[2].trim().toLowerCase() };
       else kw.entersActive = true;
     }
-    // "This character cannot be blocked by characters with BP N or less."
-    const unblock = fx.match(/cannot be blocked by characters with BP (\d+) or less/i);
-    if (unblock) kw.unblockableBP = parseInt(unblock[1]);
+    // "This character cannot be blocked by characters with BP N or less." (or "N BP or less")
+    const unblock = fx.match(/cannot be blocked by characters with (?:BP (\d+)|(\d+) ?BP) or less/i);
+    if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) is also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -184,6 +187,15 @@ const Engine = (() => {
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
       if (hasColor) delta -= parseInt(m[3] || m[4] || m[5]);
+    }
+    // loose old-set wording: "If your opponent has [red] or [yellow] Characters/card (on their
+    // field), you can reduce this card's/character's energy consumption ... by N"
+    m = fx.match(/If your opponent has \[?(\w+)\]?(?: or \[?(\w+)\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?(\d+)/i);
+    if (m) {
+      const enemy = opponentOf(p);
+      const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
+      const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
+      if (hasColor) delta -= parseInt(m[3]);
     }
     return delta;
   }
