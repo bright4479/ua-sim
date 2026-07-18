@@ -147,6 +147,8 @@ const Engine = (() => {
     /If this (?:character|card) is active, increase the energy it generates by (\d+)/i,
     /If this character is active, this character generates additional (\d+)/i,
   ];
+  // newer-series wording without a number ("it gains [purple] energy generation") — always +1
+  const RX_SELF_GEN_NO_NUM = /If this (?:character|card) is active, it gains \[?\w+\]? energy generation/i;
   function selfGenBonus(u) {
     if (u.rested) return 0;
     const fx = u.card.effect || '';
@@ -154,6 +156,7 @@ const Engine = (() => {
       const m = fx.match(rx);
       if (m) return parseInt(m[1]);
     }
+    if (RX_SELF_GEN_NO_NUM.test(fx)) return 1;
     return 0;
   }
   function energyGen(p) {

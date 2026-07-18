@@ -178,13 +178,13 @@
   // matchers key off a handful of unambiguous fragments so minor wording drift
   // doesn't silently break the whole pattern.
   const RX = {
-    onplayDraw: /^\[On Play\]\s*Draw (\d+) cards?\.?$/i,
-    apActive: /^Choose up to (\d+) of your AP [Cc]ards and set (?:it|them) to active\.?$/i,
+    onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
+    apActive: /^Choose up to (\d+) of your? AP [Cc]ards and (?:(?:set|switch) (?:it|them) to active|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it (?:gets|gains) \+(\d+) BP during this turn\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line, it gets -(\d+) BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line and rest it\.?$/i,
     bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
-    onRetireDraw: /^\[On Retire\]\s*Draw (\d+) cards?\.?$/i,
+    onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it gets|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
@@ -192,19 +192,42 @@
   // character at the end of your Main Phase." — printed near-identically on ~90 cards across the
   // whole game (a cheap "burn a body for a temporary energy boost" archetype piece).
   const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated energy (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
+  // newer-series wording: "This character gains [purple] energy generation and 'At the end of
+  // the main phase, retire this character' until the end of the turn." (always +1)
+  const RX_SELF_GEN_RETIRE2 = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gains (?:\[?\w+\]?\s*)?energy generation and ["“']*At the end of (?:your|the) [Mm]ain [Pp]hase, retire this character\.?["”']*\s*during this turn\.?$/i;
 
-  function firstLine(fx) { return (fx || '').split('@')[0].trim(); }
+  // Newer series (SLG, MST, IYS, CSM, KJN, ...) use a different translation style: spelled-out
+  // numbers ("draw a card", "top three cards"), "until the end of the turn", "gains 1000 BP"
+  // without a plus sign, "into your Outside Area", "{X} instead" braces, etc. Normalizing every
+  // clause into the older style before matching lets one set of matchers cover both styles.
+  const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, twenty: 20 };
+  function normalizeFx(s) {
+    let t = s;
+    t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
+    t = t.replace(/\ba card\b/gi, '1 card');
+    t = t.replace(/\buntil the end of the turn\b/gi, 'during this turn');
+    t = t.replace(/\b(gains|gets) (\d+) ?BP\b/gi, '$1 +$2 BP');
+    t = t.replace(/\bwith (\d+) or (less|more|lower|higher) required energy\b/gi, 'with required energy of $1 or $2');
+    t = t.replace(/\binto (?:your|the) Outside Area\b/gi, 'to the Outside Area');
+    t = t.replace(/\b(?:on|in) your field\b/gi, 'on your area');
+    t = t.replace(/\bfront line\b/gi, 'Front Line');
+    t = t.replace(/\bswitch (it|them) to active\b/gi, 'set $1 to active');
+    t = t.replace(/[{}]/g, '');
+    return t;
+  }
+
+  function firstLine(fx) { return normalizeFx((fx || '').split('@')[0].trim()); }
   // Some cards list a passive clause BEFORE their "[On Play]"/etc. clause (joined by '@'), so the
   // relevant clause isn't always segment 0 — find whichever '@'-separated segment actually starts
-  // with the given marker.
+  // with the given marker. Returned clause is normalized.
   function findClause(fx, markerRegex) {
-    const segs = (fx || '').split('@').map(s => s.trim());
+    const segs = (fx || '').split('@').map(s => normalizeFx(s.trim()));
     return segs.find(s => markerRegex.test(s)) || null;
   }
   // same idea, but returns the regex match result from whichever segment matches (for patterns
   // without a fixed bracket-marker prefix, like the AP-untap event text).
   function findMatch(fx, regex) {
-    for (const s of (fx || '').split('@').map(s => s.trim())) {
+    for (const s of (fx || '').split('@').map(s => normalizeFx(s.trim()))) {
       const m = s.match(regex);
       if (m) return m;
     }
@@ -214,7 +237,7 @@
   // "[On Play] Draw N card(s), place/put/discard M card(s) from your hand to the Outside
   // Area/Remove Area." — extremely common, but with many small wording variants.
   function matchDrawDiscard(fx) {
-    const m = fx.match(/^\[On Play\]\s*Draw (\d+) cards?,\s*(.*)$/i);
+    const m = fx.match(/^\[On Play\]\s*Draw (\d+)(?: cards?)?(?:,| and|, then| then)\s*(.*)$/i);
     if (!m) return null;
     const rest = m[2];
     const dm = rest.match(/(?:place|put|discard)\s+(\d+)\s+cards?/i);
@@ -262,6 +285,7 @@
     if (!m) m = fx.match(/From among them,?\s*reveal up(?: to)? (\d+)?\s*(?:to )?(.+?),?\s*and add (?:it|them)?\s*to (?:your hand|the hand)/i);
     if (!m) m = fx.match(/Add up to (\d+)\s+(.+?)\s+among them to (?:the hand|your hand)/i);
     if (!m) m = fx.match(/Reveal up to (\d+)\s+(.+?)\s+and add it to your hand/i);
+    if (!m) m = fx.match(/Reveal and [Aa]dd (?:up to )?(\d+) (?:cards? with )?(.+?)(?: among them| to hand|\.)/i);
     if (!m) return null;
     const maxPick = parseInt(m[1]) || 1;
     const predicate = buildLookAtTopPredicate(m[2].replace(/^to\s+/, ''));
@@ -315,7 +339,7 @@
   }
   // ... or "top or bottom of your deck" — top-or-bottom variant.
   function matchScryTopBottom(fx) {
-    if (!/^\[On Play\]\s*Look at the top card of your deck/i.test(fx)) return null;
+    if (!/^\[On Play\]\s*Look at (?:the top card|1 card from the top) of your deck/i.test(fx)) return null;
     if (!/top or bottom|top of[^.]*bottom/i.test(fx)) return null;
     return true;
   }
@@ -324,9 +348,13 @@
   // is a <NAME> on your area, it's BP M or less instead." — common Event/On-Play text with an
   // optional name-gated BP-threshold upgrade.
   function matchRetireEnemyConditional(fx) {
-    const m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with [\["]?BP (\d+) or less[\]"]? and retire it\.?(?:\s*If there is an? <([^>]+)> on your area, it'?s [\["]?BP (\d+) or less[\]"]? instead\.?)?/i);
-    if (!m) return null;
-    return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
+    let m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with [\["]?BP (\d+) or less[\]"]? and retire it\.?(?:\s*If there is an? <([^>]+)> on your area, it'?s [\["]?BP (\d+) or less[\]"]? instead\.?)?/i);
+    if (m) return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
+    // newer-series word order: "Choose 1 character with 3000 or less BP on your opponent's
+    // front line and retire it. If <NAME> is on your area, 5000 or less BP instead."
+    m = fx.match(/Choose (?:up to )?1 character with (\d+) or less BP on your opponent'?s Front Line and retire it\.?(?:\s*If <([^>]+)> is on your area, (\d+) or less BP instead\.?)?/i);
+    if (m) return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
+    return null;
   }
   // bare (no "[On Play]" prefix) debuff/rest text, common on Event cards.
   function matchBareDebuffEnemy(fx) {
@@ -482,15 +510,15 @@
 
   function buildBpEvaluator(card) {
     const rules = [];
-    for (const clause of (card.effect || '').split('@').map(s => s.trim())) {
+    for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
       let m;
       let when = 'always';
       let rest = clause;
       if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
       else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
 
-      // unconditional: "This character gets/gains +N BP."
-      if ((m = rest.match(/^This character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      // unconditional: "This character gets/gains +N BP." (or bare "This Character +1000BP.")
+      if ((m = rest.match(/^This [Cc]haracter (?:(?:gets|gains) )?\+(\d+) ?BP\.?$/i))) {
         if (when !== 'always') rules.push({ when, cond: null, amount: parseInt(m[1]) }); // always-on flat bonus would be printed BP, skip
         continue;
       }
@@ -566,8 +594,16 @@
     if (!fx) return null;
     let m;
     if ((m = fx.match(RX_SELF_GEN_RETIRE))) return { kind: 'selfGenRetire', n: parseInt(m[1]) };
+    if (fx.match(RX_SELF_GEN_RETIRE2)) return { kind: 'selfGenRetire', n: 1 };
+    // HTR-style: "This character generates 1 additional [blue] energy. At the end of the main phase, retire this character."
+    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character generates (\d+) additional (?:\[?\w+\]?\s*)?energy\.?\s*At the end of the [Mm]ain [Pp]hase, retire this character\.?$/i)))
+      return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainDiscardImpact))) return { kind: 'discardImpact', discardN: parseInt(m[1]), impact: parseInt(m[2]) };
+    // "[Main] [Rest this card] Look at the top card / 1 card from the top ... top or bottom"
+    if (/^\[Main\]\s*\[Rest this card\]\s*Look at (?:the top card|1 card from the top|the top 1 cards?) of your deck/i.test(fx) &&
+        /top or bottom|top of[^.]*bottom/i.test(fx))
+      return { kind: 'restScryTopBottom' };
     return null;
   }
 
@@ -593,6 +629,10 @@
       picked.sort((a, b) => b - a).forEach(i => { p.sideline.push(p.hand.splice(i, 1)[0]); });
       unit.tempImpact += mm.impact;
       log(`${unit.card.name}: ได้ [Impact ${mm.impact}] เทิร์นนี้ (ทิ้ง ${mm.discardN} ใบ)`);
+    } else if (mm.kind === 'restScryTopBottom') {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      await scryTop(p, ['top', 'bottom']);
     }
   };
 
