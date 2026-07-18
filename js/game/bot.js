@@ -45,7 +45,7 @@ function makeBotController() {
 
       // 0) try any untried [Activate: Main] ability once per turn
       const abilityUnit = [...p.front, ...p.energy].find(u =>
-        !u.rested && !abilityTried.has(u.uid) && Effects.registry[u.no]?.onMain);
+        !u.rested && !abilityTried.has(u.uid) && Effects.hasMain(u.card));
       if (abilityUnit) {
         abilityTried.add(abilityUnit.uid);
         return { type: 'ability', uid: abilityUnit.uid };

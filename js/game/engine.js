@@ -17,6 +17,10 @@ const Engine = (() => {
       impact: 0,
       dmg: 1,
       raidTargets: [],
+      entersActive: false,       // "This character/Field is played in active."
+      entersActiveIf: null,      // conditional variant: {kind:'name'|'traitCount', ...}
+      unblockableBP: null,       // "This character cannot be blocked by characters with BP N or less."
+      alsoTreatedAs: [],         // "This card is also treated as <NAME>" — for Raid name-matching
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -30,7 +34,35 @@ const Engine = (() => {
       if (t.startsWith('<')) kw.raidTargets.push({ kind: 'name', value: t.slice(1, -1).trim() });
       else kw.raidTargets.push({ kind: 'trait', value: t.slice(1, -1).trim() });
     }
+    // "This character/Field is played in active." (sometimes gated by a condition clause first)
+    if (/(?:this character|this field|this card) is played in active/i.test(fx)) {
+      const nameCond = fx.match(/If there is a character on your area that includes <([^>]+)> in its name, (?:this character|this field) is played in active/i);
+      const traitCond = fx.match(/If there are (\d+) or more <Trait:?\s*([^>]+)> cards? on your area, (?:this character|this field) is played in active/i);
+      if (nameCond) kw.entersActiveIf = { kind: 'name', value: nameCond[1].trim() };
+      else if (traitCond) kw.entersActiveIf = { kind: 'traitCount', n: parseInt(traitCond[1]), trait: traitCond[2].trim().toLowerCase() };
+      else kw.entersActive = true;
+    }
+    // "This character cannot be blocked by characters with BP N or less."
+    const unblock = fx.match(/cannot be blocked by characters with BP (\d+) or less/i);
+    if (unblock) kw.unblockableBP = parseInt(unblock[1]);
+    // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
+    const treated = fx.matchAll(/This (?:card|character) is also treated as <([^>]+)>/gi);
+    for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
     return kw;
+  }
+
+  // resolves whether a unit should enter active based on its (possibly conditional) keyword
+  function shouldEnterActive(p, kw) {
+    if (kw.entersActive) return true;
+    if (!kw.entersActiveIf) return false;
+    if (kw.entersActiveIf.kind === 'name') {
+      return [...p.front, ...p.energy].some(u => (u.card.name || '').includes(kw.entersActiveIf.value));
+    }
+    if (kw.entersActiveIf.kind === 'traitCount') {
+      const n = [...p.front, ...p.energy].filter(u => (u.card.traits || '').toLowerCase().includes(kw.entersActiveIf.trait)).length;
+      return n >= kw.entersActiveIf.n;
+    }
+    return false;
   }
 
   function makeUnit(cardNo) {
@@ -107,11 +139,19 @@ const Engine = (() => {
   // "If this character is active, increase this character's generated energy by N[color]." — printed
   // identically (with only the number/color varying) on characters across every series, so it is
   // handled generically here rather than per-card.
-  const RX_SELF_GEN_WHEN_ACTIVE = /If this character is active, increase this character'?s generated energy by (\d+)/i;
+  const RX_SELF_GEN_WHEN_ACTIVE = [
+    /If this character is active, increase this character'?s generated energy by (\d+)/i,
+    /If this (?:character|card) is active, increase the energy it generates by (\d+)/i,
+    /If this character is active, this character generates additional (\d+)/i,
+  ];
   function selfGenBonus(u) {
     if (u.rested) return 0;
-    const m = (u.card.effect || '').match(RX_SELF_GEN_WHEN_ACTIVE);
-    return m ? parseInt(m[1]) : 0;
+    const fx = u.card.effect || '';
+    for (const rx of RX_SELF_GEN_WHEN_ACTIVE) {
+      const m = fx.match(rx);
+      if (m) return parseInt(m[1]);
+    }
+    return 0;
   }
   function energyGen(p) {
     const gen = {}; // color -> amount
@@ -132,14 +172,21 @@ const Engine = (() => {
     if (m) delta -= parseInt(m[1]);
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
-    m = fx.match(/If there is an? (\w+)(?: or (?:an? )?(\w+))? card on your opponent'?s area, reduce this card'?s required energy in your hand by (\d+)/i);
+    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? card on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by (\d+)|reduce the energy requirement of this card in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
-      if (hasColor) delta -= parseInt(m[3]);
+      if (hasColor) delta -= parseInt(m[3] || m[4] || m[5]);
     }
     return delta;
+  }
+  // AP-cost equivalent of the above (kept separate since it feeds effectiveAp, not effectiveNeed)
+  function textApDelta(p, card) {
+    const fx = card.effect || '';
+    const m = fx.match(/If there is a <([^>]+)> on your area, reduce the AP cost of this card in your hand by (\d+)/i);
+    if (m && [...p.front, ...p.energy].some(u => (u.card.name || '').includes(m[1]))) return -parseInt(m[2]);
+    return 0;
   }
   function peekDiscount(p, card) {
     if (p.pendingDiscount && p.pendingDiscount.predicate(card))
@@ -157,7 +204,7 @@ const Engine = (() => {
   function effectiveAp(p, card) {
     const mod = Effects.registry[card.no]?.costMod?.(p, card) || {};
     const disc = peekDiscount(p, card);
-    return Math.max(0, (card.ap || 0) + (mod.apDelta || 0) + disc.apDelta);
+    return Math.max(0, (card.ap || 0) + textApDelta(p, card) + (mod.apDelta || 0) + disc.apDelta);
   }
   function hasEnergyFor(p, c) {
     const need = effectiveNeed(p, c);
@@ -319,8 +366,7 @@ const Engine = (() => {
         else if (act.type === 'event') await playEvent(p, act);
         else if (act.type === 'ability') {
           const u = findUnit(p, act.uid);
-          const h = u && Effects.registry[u.no]?.onMain;
-          if (h) await h(G, p, u);
+          if (u) await Effects.onMain(G, p, u);
         }
         else if (act.type === 'bpmod') { // manual effect application
           const u = findUnit(p, act.uid) || findUnit(opponentOf(p), act.uid);
@@ -389,7 +435,7 @@ const Engine = (() => {
     consumeDiscount(p, c);
     p.hand.splice(hi, 1);
     const u = makeUnit(act.no);
-    u.rested = true; // enters resting
+    u.rested = !shouldEnterActive(p, u.kw); // enters resting, unless "played in active"
     line.push(u);
     log(`${p.name} ลง ${c.name} (${c.type}) ที่ ${act.line === 'front' ? 'Front' : 'Energy'} Line`);
     await Effects.onPlay(G, p, u);
@@ -484,7 +530,8 @@ const Engine = (() => {
       // blocking (not allowed vs snipe-target attacks)
       let blocker = null;
       if (!targetUnit) {
-        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character');
+        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' &&
+          (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP));
         if (candidates.length) {
           const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
           if (b) {
@@ -650,7 +697,7 @@ const Engine = (() => {
         if (u.card.type !== 'Character') continue;
         if (u.kw.raidTargets.length) continue; // target must not possess Raid
         for (const t of kw.raidTargets) {
-          if (t.kind === 'name' && (u.card.name || '').includes(t.value)) out.push(u);
+          if (t.kind === 'name' && ((u.card.name || '').includes(t.value) || u.kw.alsoTreatedAs.some(a => a.includes(t.value) || t.value.includes(a)))) out.push(u);
           else if (t.kind === 'trait' && (u.card.traits || '').includes(t.value)) out.push(u);
         }
       }
@@ -846,6 +893,11 @@ const Effects = {
     const h = this.registry[card.no]?.onEvent;
     if (h) await h(G, p, card);
   },
+  // [Activate: Main] ability, invoked by the player via the unit menu
+  async onMain(G, p, unit) {
+    const h = this.registry[unit.no]?.onMain;
+    if (h) await h(G, p, unit);
+  },
   // fires whenever `unit` leaves the front/energy line for any reason (sideline, hand, removal)
   async onLeaveField(G, p, unit) {
     const h = this.registry[unit.no]?.onLeaveField;
@@ -865,5 +917,11 @@ const Effects = {
   async onRaided(G, p, targetNo, raiderUnit) {
     const h = this.registry[targetNo]?.onRaided;
     if (h) await h(G, p, targetNo, raiderUnit);
+  },
+  // predicate: does this card have SOME [Activate: Main] ability available (registry script or a
+  // generic pattern)? Used by the UI/bot to decide whether to show/attempt the ability at all,
+  // without actually running it. common.js extends this to also check generic onMain patterns.
+  hasMain(card) {
+    return !!this.registry[card.no]?.onMain;
   },
 };

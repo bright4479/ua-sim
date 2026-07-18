@@ -166,12 +166,19 @@
   // doesn't silently break the whole pattern.
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+) cards?\.?$/i,
-    apActive: /^Choose up to (\d+) of your AP cards and set them to active\.?$/i,
-    onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it gets \+(\d+) BP during this turn\.?$/i,
+    apActive: /^Choose up to (\d+) of your AP [Cc]ards and set (?:it|them) to active\.?$/i,
+    onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it (?:gets|gains) \+(\d+) BP during this turn\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line, it gets -(\d+) BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line and rest it\.?$/i,
-    bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this character to your hand\.?$/i,
+    bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
+    onRetireDraw: /^\[On Retire\]\s*Draw (\d+) cards?\.?$/i,
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it gets|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
+  // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
+  // character at the end of your Main Phase." — printed near-identically on ~90 cards across the
+  // whole game (a cheap "burn a body for a temporary energy boost" archetype piece).
+  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated energy (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
 
   function firstLine(fx) { return (fx || '').split('@')[0].trim(); }
   // Some cards list a passive clause BEFORE their "[On Play]"/etc. clause (joined by '@'), so the
@@ -202,6 +209,49 @@
     return { drawN: parseInt(m[1]), discardN: parseInt(dm[1]), toRemoval: /remove area/i.test(rest) };
   }
 
+  // "[On Play] Look at the top N cards of your deck. Reveal up to M <criteria> among them and
+  // add it to your hand. Place the remaining at the bottom of your deck in any order. [If you
+  // added ..., place 1 card from your hand to the Outside Area.]" — the single biggest generic
+  // pattern in the game (500+ cards), with heavy wording variation. `criteria` covers named
+  // cards, [Trait: X], color/type, and cost thresholds; anything unrecognized falls back to
+  // "any card" (the reveal-and-take flow degrades gracefully rather than doing nothing).
+  function buildLookAtTopPredicate(criteriaRaw) {
+    const t = (criteriaRaw || '').trim();
+    const traits = [...t.matchAll(/<\s*Trait:?\s*([^>]+)>/gi)].map(m => m[1].trim().toLowerCase());
+    if (traits.length) return c => (c.traits || '').toLowerCase().split(/[,;]/).map(s => s.trim())
+      .some(tr => traits.some(want => tr.includes(want) || want.includes(tr)));
+    const names = [...t.matchAll(/<([^>]+)>/g)].map(m => m[1].trim()).filter(n => !/^trait:/i.test(n));
+    if (names.length) return c => names.some(n => (c.name || '').includes(n));
+    const costMatch = t.match(/required energy of (\d+) or (higher|less|more)/i);
+    if (costMatch) { const n = parseInt(costMatch[1]), hi = /higher|more/i.test(costMatch[2]); return c => hi ? (c.need || 0) >= n : (c.need || 0) <= n; }
+    const colorMatch = t.match(/\[?(yellow|red|blue|green|purple)\]?/i);
+    const typeMatch = t.match(/\b(Character|Event|Field)\b/i);
+    if (colorMatch || typeMatch) {
+      const color = colorMatch ? colorMatch[1].toLowerCase() : null;
+      const type = typeMatch ? typeMatch[1] : null;
+      return c => (!color || (c.color || '').toLowerCase() === color) && (!type || c.type === type);
+    }
+    if (/without a trait/i.test(t)) return c => !c.traits;
+    if (/character card/i.test(t)) return c => c.type === 'Character';
+    if (/event card/i.test(t)) return c => c.type === 'Event';
+    if (/field card/i.test(t)) return c => c.type === 'Field';
+    return () => true;
+  }
+  function matchLookAtTopFetch(fx) {
+    if (!/^\d*\s*\[On Play\]\s*(?:From among them,?\s*)?Look at the top \d+ cards?/i.test(fx)) return null;
+    const nMatch = fx.match(/top (\d+) cards?/i);
+    const n = nMatch ? parseInt(nMatch[1]) : 1;
+    let m = fx.match(/(?:Reveal|Add) up to (\d+)\s+(.+?)\s+among them(?:,)?\s*and add (?:it|them|1 card|a card)?\s*to (?:your hand|the hand)/i);
+    if (!m) m = fx.match(/From among them,?\s*reveal up(?: to)? (\d+)?\s*(?:to )?(.+?),?\s*and add (?:it|them)?\s*to (?:your hand|the hand)/i);
+    if (!m) m = fx.match(/Add up to (\d+)\s+(.+?)\s+among them to (?:the hand|your hand)/i);
+    if (!m) m = fx.match(/Reveal up to (\d+)\s+(.+?)\s+and add it to your hand/i);
+    if (!m) return null;
+    const maxPick = parseInt(m[1]) || 1;
+    const predicate = buildLookAtTopPredicate(m[2].replace(/^to\s+/, ''));
+    const hasDiscard = /place 1 card from your hand to/i.test((fx.split(/among them/i).pop() || ''));
+    return { n, maxPick, predicate, hasDiscard };
+  }
+
   // "[On Play] Look at the top card of your deck ... place (that card/it) ... top of your deck
   // or (to/on) (your/the) Outside Area." — top-or-outside variant.
   function matchScryTopOutside(fx) {
@@ -216,13 +266,30 @@
     return true;
   }
 
+  // "Choose 1 character on your opponent's Front Line with BP N or less and retire it. If there
+  // is a <NAME> on your area, it's BP M or less instead." — common Event/On-Play text with an
+  // optional name-gated BP-threshold upgrade.
+  function matchRetireEnemyConditional(fx) {
+    const m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with [\["]?BP (\d+) or less[\]"]? and retire it\.?(?:\s*If there is an? <([^>]+)> on your area, it'?s [\["]?BP (\d+) or less[\]"]? instead\.?)?/i);
+    if (!m) return null;
+    return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
+  }
+  // bare (no "[On Play]" prefix) debuff/rest text, common on Event cards.
+  function matchBareDebuffEnemy(fx) {
+    const m = fx.match(/^Choose (?:up to )?1 character on your opponent'?s Front Line,\s*it (?:gets|gains) [\["]?-(\d+) ?BP[\]"]? during this turn\.?$/i);
+    return m ? parseInt(m[1]) : null;
+  }
+  function matchBareRestEnemy(fx) {
+    return /^Choose (?:up to )?1 character on your opponent'?s Front Line and rest it\.?$/i.test(fx);
+  }
+
   const origOnPlay = Effects.onPlay.bind(Effects);
   Effects.onPlay = async function (G, p, unit) {
     if (unit.card.trigger === 'Get') p._getPlayedThisTurn = true; // tracked for "if a [Get] character was played this turn" cards
     if (this.registry[unit.no]?.onPlay) return origOnPlay(G, p, unit);
     const fx = findClause(unit.card.effect, /^\[On Play\]/i);
     if (!fx) return;
-    let m, dd;
+    let m, dd, rc;
     if ((m = fx.match(RX.onplayDraw))) {
       draw(p, parseInt(m[1]));
       log(`[On Play] ${unit.card.name}: ${p.name} จั่ว ${m[1]} ใบ`);
@@ -233,6 +300,10 @@
         if (dd.toRemoval) await manualDiscardToRemoval(p);
         else await discardFromHand(p);
       }
+    } else if ((dd = matchLookAtTopFetch(fx))) {
+      log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      const taken = await lookTopAndTake(p, dd.n, dd.predicate, dd.maxPick, `${unit.card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      if (taken.length && dd.hasDiscard) await discardFromHand(p);
     } else if (matchScryTopOutside(fx)) {
       log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุดของเด็ค`);
       await scryTop(p, ['top', 'outside']);
@@ -247,6 +318,9 @@
       await restEnemyFront(p);
     } else if ((m = fx.match(RX.bounceSelfOrOther))) {
       await bounceSelfOrOther(p, unit, parseInt(m[1]));
+    } else if ((rc = matchRetireEnemyConditional(fx))) {
+      const limit = rc.name && hasCardNamed(p, rc.name) ? rc.upgradedBP : rc.baseBP;
+      await retireEnemyFront(p, limit);
     }
   };
 
@@ -254,9 +328,16 @@
   Effects.onEvent = async function (G, p, card) {
     if (this.registry[card.no]?.onEvent) return origOnEvent(G, p, card);
     const fx = firstLine(card.effect);
-    let m;
+    let m, rc;
     if ((m = findMatch(card.effect, RX.apActive))) {
       await apUntap(p, parseInt(m[1]));
+    } else if ((rc = matchRetireEnemyConditional(fx))) {
+      const limit = rc.name && hasCardNamed(p, rc.name) ? rc.upgradedBP : rc.baseBP;
+      await retireEnemyFront(p, limit);
+    } else if ((m = matchBareDebuffEnemy(fx))) {
+      await debuffEnemyFront(p, -m);
+    } else if (matchBareRestEnemy(fx)) {
+      await restEnemyFront(p);
     } else {
       log(`Event ${card.name}: ${fx} (ทำ effect ตามการ์ด — manual)`);
       if (!p.controller.isBot) {
@@ -265,5 +346,58 @@
           `<p class="fx" style="white-space:pre-wrap">${UAData.fxText(card.effect || '')}</p>`);
       }
     }
+  };
+
+  // ---------- generic [Main] and [On Retire] patterns ----------
+  function matchOnMain(card) {
+    const fx = findClause(card.effect, /^\[Main\]/i);
+    if (!fx) return null;
+    let m;
+    if ((m = fx.match(RX_SELF_GEN_RETIRE))) return { kind: 'selfGenRetire', n: parseInt(m[1]) };
+    if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[1]) };
+    if ((m = fx.match(RX.mainDiscardImpact))) return { kind: 'discardImpact', discardN: parseInt(m[1]), impact: parseInt(m[2]) };
+    return null;
+  }
+
+  const origOnMain = Effects.onMain.bind(Effects);
+  Effects.onMain = async function (G, p, unit) {
+    if (this.registry[unit.no]?.onMain) return origOnMain(G, p, unit);
+    const mm = matchOnMain(unit.card);
+    if (!mm) return;
+    if (mm.kind === 'selfGenRetire') {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่ ใช้ ability ไม่ได้'); return; }
+      unit.rested = true;
+      unit.tempGen += mm.n;
+      unit.retireAtEndOfMain = true;
+      log(`${unit.card.name}: +${mm.n} energy generation เทิร์นนี้ (จะ retire เมื่อจบ Main Phase)`);
+    } else if (mm.kind === 'restBuffOther') {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่ ใช้ ability ไม่ได้'); return; }
+      unit.rested = true;
+      await buffOwnCharacter(p, mm.n, { excludeUnit: unit });
+    } else if (mm.kind === 'discardImpact') {
+      if (p.hand.length < mm.discardN) { p.controller.notify?.(`ต้องทิ้ง ${mm.discardN} ใบ`); return; }
+      const picked = await p.controller.chooseCardsFromHand(p, mm.discardN, `[Discard ${mm.discardN}] เพื่อให้ [Impact ${mm.impact}] เทิร์นนี้`);
+      if (picked.length < mm.discardN) return;
+      picked.sort((a, b) => b - a).forEach(i => { p.sideline.push(p.hand.splice(i, 1)[0]); });
+      unit.tempImpact += mm.impact;
+      log(`${unit.card.name}: ได้ [Impact ${mm.impact}] เทิร์นนี้ (ทิ้ง ${mm.discardN} ใบ)`);
+    }
+  };
+
+  const origHasMain = Effects.hasMain.bind(Effects);
+  Effects.hasMain = function (card) {
+    if (origHasMain(card)) return true;
+    return !!matchOnMain(card);
+  };
+
+  // "[On Retire] Draw N card(s)." — fires whenever the card is sidelined by an effect (not battle).
+  const origOnSideline = Effects.onSideline.bind(Effects);
+  Effects.onSideline = async function (G, p, unit, reason) {
+    if (this.registry[unit.no]?.onSideline) return origOnSideline(G, p, unit, reason);
+    if (reason === 'battle') return;
+    const fx = findClause(unit.card.effect, /^\[On Retire\]/i);
+    if (!fx) return;
+    const m = fx.match(RX.onRetireDraw);
+    if (m) { draw(p, parseInt(m[1])); log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`); }
   };
 })();

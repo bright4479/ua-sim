@@ -582,7 +582,7 @@ const GameUI = (() => {
 
     if (pendingKind === 'main') {
       const opts = [];
-      if (Effects.registry[u.no]?.onMain)
+      if (Effects.hasMain(u.card))
         opts.push({ label: '⚡ ใช้ Ability [Main]', value: 'ability' });
       opts.push(
         { label: '🔍 ดูการ์ด', value: 'view' },
