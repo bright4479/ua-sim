@@ -66,6 +66,7 @@ for (const c of cards) {
     if (logs.length) fired = true;
     if (!fired && Effects.hasMain(c)) fired = true;
     if (!fired && Effects.hasGenericBp?.(c)) fired = true;
+    if (!fired && Effects.hasGenericGen?.(c)) fired = true;
     if (!fired) {
       const l2 = []; Engine.G.log = l2;
       try { await Effects.onSideline({}, p, unit, 'effect'); } catch {}

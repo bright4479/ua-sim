@@ -166,7 +166,10 @@ const Engine = (() => {
     const gen = {}; // color -> amount
     for (const u of p.energy) {
       const col = u.card.color || 'None';
-      const bonus = selfGenBonus(u) + (u.tempGen || 0) + (Effects.registry[u.no]?.genMod?.(u) || 0);
+      const hook = Effects.registry[u.no]?.genMod;
+      const modBonus = hook ? (hook(u) || 0)
+        : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
+      const bonus = selfGenBonus(u) + (u.tempGen || 0) + modBonus;
       gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
     }
     return gen;
@@ -187,6 +190,19 @@ const Engine = (() => {
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
       if (hasColor) delta -= parseInt(m[3] || m[4] || m[5]);
+    }
+    // "If there is a <NAME> on/in your Outside Area, reduce the energy requirement of this card
+    // in your hand by N." — sideline-gated discount
+    m = fx.match(/If there is an? <([^>]+)> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by (\d+)/i);
+    if (m) {
+      const name = m[1].trim();
+      if (p.sideline.some(no => (UAData.byNo.get(no)?.name || '').includes(name))) delta -= parseInt(m[2]);
+    }
+    // "If there is a <NAME> on your area, reduce the required energy of this card in your hand by N."
+    m = fx.match(/If there is an? <([^>]+)> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by (\d+)/i);
+    if (m) {
+      const name = m[1].trim();
+      if ([...p.front, ...p.energy].some(u => (u.card.name || '').includes(name))) delta -= parseInt(m[2]);
     }
     // loose old-set wording: "If your opponent has [red] or [yellow] Characters/card (on their
     // field), you can reduce this card's/character's energy consumption ... by N"

@@ -182,7 +182,7 @@
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     apActive: /^Choose up to (\d+) of your? AP [Cc]ards and (?:(?:set|switch) (?:it|them) to active|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it (?:gets|gains) \+(\d+) BP during this turn\.?$/i,
-    onplayDebuffEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line, it gets -(\d+) BP during this turn\.?$/i,
+    onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line, it (?:gets|gains) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
@@ -370,6 +370,21 @@
   function matchBareRestEnemy(fx) {
     return /^Choose (?:up to )?1 character on your opponent'?s Front Line and rest it\.?$/i.test(fx);
   }
+  // "Choose (up to) 1 character on your opponent's Front Line with BP N or less and return it to
+  // the hand." — enemy bounce with BP cap (Event or [On Play])
+  function matchBounceEnemy(fx) {
+    const m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with BP (\d+) or less and return it to (?:the|your opponent'?s) hand\.?/i);
+    return m ? parseInt(m[1]) : null;
+  }
+  async function bounceEnemyFront(p, bpLimit) {
+    const enemy = Engine.opponentOf(p);
+    const units = enemy.front.filter(u => u.card.type === 'Character' && (bpLimit == null || Engine.bp(u) <= bpLimit));
+    if (!units.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู (BP ${bpLimit ?? '-'} หรือน้อยกว่า) กลับมือ`, true);
+    const u = units.find(x => x.uid === uid);
+    if (u) { await Engine.returnUnitToHand(enemy, u); log(`${p.name}: ${u.card.name} ถูกส่งกลับมือ`); }
+    return u;
+  }
 
   const origOnPlay = Effects.onPlay.bind(Effects);
   Effects.onPlay = async function (G, p, unit) {
@@ -440,6 +455,8 @@
       if (Engine.G.retiredThisTurn) { draw(p, parseInt(m[1])); log(`[On Play] ${unit.card.name}: จั่ว ${m[1]} ใบ`); }
     } else if ((m = fx.match(/^\[On Play\]\s*If a character was retired during this turn, choose (?:up to )?1 character (?:on|from) your opponent'?s Front Line, it gets -(\d+) ?BP during this turn\.?$/i))) {
       if (Engine.G.retiredThisTurn) await debuffEnemyFront(p, -parseInt(m[1]));
+    } else if (/^\[On Play\]/i.test(fx) && (m = matchBounceEnemy(fx))) {
+      await bounceEnemyFront(p, m);
     }
   };
 
@@ -488,6 +505,8 @@
       await debuffEnemyFront(p, -m);
     } else if (matchBareRestEnemy(fx)) {
       await restEnemyFront(p);
+    } else if ((m = matchBounceEnemy(fx))) {
+      await bounceEnemyFront(p, m);
     } else {
       log(`Event ${card.name}: ${fx} (ทำ effect ตามการ์ด — manual)`);
       if (!p.controller.isBot) {
@@ -602,6 +621,34 @@
   Effects.hasGenericBp = function (card) {
     if (!bpEvalCache.has(card.no)) bpEvalCache.set(card.no, buildBpEvaluator(card));
     return !!bpEvalCache.get(card.no);
+  };
+
+  // ---------- generic conditional energy generation ----------
+  // "If there are N or more (other) <Trait:X> (cards) in/on your field/area, this field/character
+  // generates additional N [color] energy." — evaluated live from the energy line.
+  const genEvalCache = new Map();
+  function buildGenEvaluator(card) {
+    for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
+      const m = clause.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards? |characters? )?(?:on|in) your (?:area|field), this (?:field|character|card)'?s? generates? additional (\d+)/i);
+      if (m) {
+        const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase(), amt = parseInt(m[5]);
+        return (owner, unit) => {
+          const n = [...owner.front, ...owner.energy].filter(u => (!other || u !== unit) &&
+            (u.card.traits || '').toLowerCase().includes(trait)).length;
+          return n >= need ? amt : 0;
+        };
+      }
+    }
+    return null;
+  }
+  Effects.genericGenMod = function (owner, unit) {
+    if (!genEvalCache.has(unit.no)) genEvalCache.set(unit.no, buildGenEvaluator(unit.card));
+    const f = genEvalCache.get(unit.no);
+    return f ? f(owner, unit) : 0;
+  };
+  Effects.hasGenericGen = function (card) {
+    if (!genEvalCache.has(card.no)) genEvalCache.set(card.no, buildGenEvaluator(card));
+    return !!genEvalCache.get(card.no);
   };
 
   // ---------- generic [Main] and [On Retire] patterns ----------
