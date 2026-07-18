@@ -1,0 +1,84 @@
+// UA SIM - list cards in a given series whose effect text does NOT yet get any
+// automatic handling (registry script / generic pattern / keyword), so a scripting
+// pass can prioritize them without re-deriving what's already covered.
+import { readFileSync } from 'fs';
+
+global.window = globalThis;
+global.localStorage = { getItem: () => null, setItem: () => {} };
+global.document = { getElementById: () => null, querySelectorAll: () => [], createElement: () => ({ style: {} }), body: { appendChild() {}, removeChild() {} } };
+global.DeckBuilder = { toast: () => {} };
+
+const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js']
+  .map(p => readFileSync(p, 'utf8')).join('\n;\n') +
+  '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;';
+(0, eval)(src);
+
+let uidSeq = 1;
+function fakeUnit(no) {
+  const c = UAData.byNo.get(no);
+  return { uid: uidSeq++, no, card: c, rested: false, under: [], counters: [], bpMod: 0, bpPersist: 0, tempImpact: 0, tempGen: 0, tempDmg: 0, kw: Engine.parseKeywords(c) };
+}
+function fakePlayer() {
+  return {
+    name: 'x', hand: ['DUMMY'], deck: ['DUMMY', 'DUMMY', 'DUMMY', 'DUMMY', 'DUMMY', 'DUMMY'],
+    sideline: [], removal: [], front: [fakeUnit('DUMMY2')], energy: [fakeUnit('DUMMY2')], apTotal: 3, apRested: 1,
+    controller: {
+      isBot: true,
+      async chooseOption(p, t, opts) { return opts[0]?.value; },
+      async chooseOwnCharacter(p, units) { return units[0]?.uid; },
+      async chooseEnemyCharacter(p, units) { return units[0]?.uid; },
+      async chooseCardFromHand() { return 0; },
+      async chooseCardsFromHand(p, n) { return p.hand.map((_, i) => i).slice(0, n); },
+      async chooseCardFromRemoval() { return null; },
+      async chooseCardFromSideline() { return null; },
+      async chooseRevealPick(p, revealed, t, pred, max) {
+        const idxs = revealed.map((no, i) => i).filter(i => !pred || pred(UAData.byNo.get(no)));
+        return idxs.slice(0, max);
+      },
+      notify() {},
+    },
+  };
+}
+UAData.byNo.set('DUMMY', { no: 'DUMMY', name: 'Dummy', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000 });
+UAData.byNo.set('DUMMY2', { no: 'DUMMY2', name: 'Dummy Other', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000, effect: '' });
+
+function hasKeywordOnly(c) {
+  const kw = Engine.parseKeywords(c);
+  const passiveText = /if this character is active, increase|generates additional|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card/i.test(c.effect || '');
+  return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||
+    kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.alsoTreatedAs.length || passiveText;
+}
+
+const seriesArg = process.argv[2];
+const cards = UAData.cards.filter(c => c.main && c.series === seriesArg && c.effect && c.effect.trim());
+const uncovered = [];
+
+for (const c of cards) {
+  if (Effects.registry[c.no]) continue;
+  let fired = false;
+  const logs = [];
+  Engine.G.log = logs;
+  if (c.type === 'Character' || c.type === 'Field') {
+    const p = fakePlayer(), enemy = fakePlayer();
+    Engine.G.players = [p, enemy];
+    const unit = { no: c.no, card: c, rested: false, under: [], counters: [], bpMod: 0, bpPersist: 0, tempImpact: 0, tempGen: 0, tempDmg: 0 };
+    try { await Effects.onPlay({}, p, unit); } catch {}
+    if (logs.length) fired = true;
+    if (!fired && Effects.hasMain(c)) fired = true;
+    if (!fired) {
+      const logs2 = []; Engine.G.log = logs2;
+      try { await Effects.onSideline({}, p, unit, 'effect'); } catch {}
+      if (logs2.length) fired = true;
+    }
+  } else if (c.type === 'Event') {
+    const p = fakePlayer(), enemy = fakePlayer();
+    Engine.G.players = [p, enemy];
+    try { await Effects.onEvent({}, p, c); } catch {}
+    if (logs.length && !logs.some(l => l.includes('manual'))) fired = true;
+  }
+  if (!fired && !hasKeywordOnly(c)) uncovered.push(c);
+}
+
+console.log(`${seriesArg}: ${cards.length} with effect, ${uncovered.length} uncovered\n`);
+for (const c of uncovered) console.log(`${c.no} | ${c.name} | ${c.type} | ${c.effect.replace(/\n/g, ' ')}`);

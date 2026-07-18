@@ -142,6 +142,19 @@
     return no;
   }
 
+  // "Add 1 card from your Life to your hand." — Life cards are face-down, so the choice is by
+  // position only (revealed once it moves to hand).
+  async function addLifeToHand(p) {
+    if (!p.life.length) return null;
+    const opts = p.life.map((_, i) => ({ label: `🂠 Life ใบที่ ${i + 1}`, value: i }));
+    const i = await p.controller.chooseOption(p, 'เลือกการ์ด Life 1 ใบเพิ่มเข้ามือ', opts);
+    if (i == null) return null;
+    const no = p.life.splice(i, 1)[0];
+    p.hand.push(no);
+    log(`${p.name}: เพิ่ม ${UAData.byNo.get(no)?.name} จาก Life เข้ามือ`);
+    return no;
+  }
+
   function countNoTrigger(p) {
     return [...p.front, ...p.energy].filter(u => !u.card.trigger).length;
   }
@@ -155,7 +168,7 @@
   window.UAEffectHelpers = {
     discardFromHand, manualDiscardToRemoval, scryTop, lookTopAndTake, buffOwnCharacter,
     debuffEnemyFront, restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther,
-    fetchFromSideline, countNoTrigger, hasCardNamed, hasCardOfColor,
+    fetchFromSideline, addLifeToHand, countNoTrigger, hasCardNamed, hasCardOfColor,
   };
 
   // ---------- generic text-pattern layer ----------

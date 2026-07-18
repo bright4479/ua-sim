@@ -281,6 +281,7 @@ const Engine = (() => {
     // 1: abilities lasting "until the start of your next turn" expire
     for (const u of [...p.front, ...p.energy]) u.bpPersist = 0;
     p._getPlayedThisTurn = false;
+    p._drewThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
@@ -317,6 +318,7 @@ const Engine = (() => {
         return false;
       }
       p.hand.push(p.deck.shift());
+      p._drewThisTurn = (p._drewThisTurn || 0) + 1; // tracked for "if you drew N+ cards this turn" / "if opponent drew a card" cards
     }
     update();
     return true;
@@ -556,8 +558,12 @@ const Engine = (() => {
         const aBP = bp(atk), dBP = bp(defender);
         log(`⚔ ${atk.card.name} (${aBP}) vs ${defender.card.name} (${dBP})`);
         if (aBP >= dBP) {
-          await sidelineUnit(enemy, defender, 'battle');
-          log(`${defender.card.name} แพ้ battle → Sideline`);
+          const winHook = Effects.registry[atk.no]?.onWinBattle;
+          const handled = winHook ? await winHook(G, p, atk, enemy, defender) : false;
+          if (!handled) {
+            await sidelineUnit(enemy, defender, 'battle');
+            log(`${defender.card.name} แพ้ battle → Sideline`);
+          }
           const impactBonusHook = Effects.registry[atk.no]?.impactBonus?.(p, atk) || 0;
           const impact = (atk.kw.nullifiedImpact ? 0 : atk.kw.impact) + (atk.tempImpact || 0) + impactBonusHook;
           if (impact > 0 && !defender.kw.nullifyImpact) {
