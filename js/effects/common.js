@@ -250,6 +250,10 @@
     if (/field card/i.test(t)) return c => c.type === 'Field';
     return () => true;
   }
+  // general card predicate from a free-text criteria fragment (names / traits / color / type /
+  // cost threshold) — shared by look-at-top, fetch-from-outside, free-play-from-hand patterns.
+  const buildCardPredicate = buildLookAtTopPredicate;
+
   function matchLookAtTopFetch(fx) {
     if (!/^\d*\s*\[On Play\]\s*(?:From among them,?\s*)?Look at the top \d+ cards?/i.test(fx)) return null;
     const nMatch = fx.match(/top (\d+) cards?/i);
@@ -263,6 +267,43 @@
     const predicate = buildLookAtTopPredicate(m[2].replace(/^to\s+/, ''));
     const hasDiscard = /place 1 card from your hand to/i.test((fx.split(/among them/i).pop() || ''));
     return { n, maxPick, predicate, hasDiscard };
+  }
+
+  // "[On Play] If there is a <X> (card) on your area, draw N card(s)."
+  function matchCondDraw(fx) {
+    const m = fx.match(/^\[On Play\]\s*If there (?:is|are) (?:a |an )?(?:(\d+) or more )?(.+?) (?:cards? |characters? )?on your (area|field|Front Line), draw (\d+) cards?\.?$/i);
+    if (!m) return null;
+    return { n: m[1] ? parseInt(m[1]) : 1, criteria: m[2], zone: parseZone(m[3]), drawN: parseInt(m[4]) };
+  }
+
+  // "[On Play] Play up to 1 <criteria> card with required energy of N or less (and AP cost of 1)
+  //  from your hand to your area (as) rested."
+  function matchFreePlayFromHand(fx) {
+    const m = fx.match(/^\[On Play\]\s*Play up to 1 (.+?) (?:card )?with (?:a )?required energy of (\d+) or less(?: and (?:an? )?AP cost of (\d+))? from your hand to your area,? (?:as )?rested\.?$/i);
+    if (!m) return null;
+    return { criteria: m[1], maxNeed: parseInt(m[2]), apCost: m[3] ? parseInt(m[3]) : null };
+  }
+
+  // "[On Play] You may place 1 card from your hand to the Outside Area. If you did, add up to 1
+  //  <criteria> (card) (with required energy of N or less) from your Outside Area to your hand."
+  function matchDiscardFetch(fx) {
+    const m = fx.match(/^\[On Play\]\s*You may (?:place|put) 1 card from your hand (?:in)?to (?:the|your) Outside Area\. If you did, add up to 1 (.+?) (?:cards? )?(?:with (?:a )?required energy of (\d+) or less )?from (?:the|your) Outside Area to (?:the|your) hand\.?\s*$/i);
+    if (!m) return null;
+    return { criteria: m[1], maxNeed: m[2] ? parseInt(m[2]) : null };
+  }
+
+  // "[On Play] Add up to 1 <criteria> card from your Outside Area to the/your hand."
+  function matchFetchOutside(fx) {
+    const m = fx.match(/^\[On Play\]\s*Add up to 1 (.+?) (?:card )?from (?:the|your) Outside Area to (?:the|your) hand\.?$/i);
+    if (!m) return null;
+    return { criteria: m[1] };
+  }
+
+  // "[When Attacking] Choose up to 1 <criteria> (character) on your area and it gets +N BP..."
+  function matchAttackBuff(fx) {
+    const m = fx.match(/^\[When Attacking\]\s*Choose up to 1 (.+?) (?:character |Character )?(?:card )?on your (?:area|field),? and it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i);
+    if (!m) return null;
+    return { criteria: m[1], amount: parseInt(m[2]) };
   }
 
   // "[On Play] Look at the top card of your deck ... place (that card/it) ... top of your deck
@@ -334,6 +375,58 @@
     } else if ((rc = matchRetireEnemyConditional(fx))) {
       const limit = rc.name && hasCardNamed(p, rc.name) ? rc.upgradedBP : rc.baseBP;
       await retireEnemyFront(p, limit);
+    } else if ((dd = matchCondDraw(fx))) {
+      const pred = buildCardPredicate(dd.criteria);
+      const pool = dd.zone === 'front' ? p.front : [...p.front, ...p.energy];
+      const count = pool.filter(u => u !== unit && pred(u.card)).length;
+      if (count >= dd.n) { draw(p, dd.drawN); log(`[On Play] ${unit.card.name}: จั่ว ${dd.drawN} ใบ`); }
+    } else if ((dd = matchFreePlayFromHand(fx))) {
+      const pred = buildCardPredicate(dd.criteria);
+      const idx = p.hand.findIndex(no => {
+        const c = UAData.byNo.get(no);
+        return c && pred(c) && (c.need || 0) <= dd.maxNeed && (dd.apCost == null || (c.ap || 0) === dd.apCost);
+      });
+      if (idx >= 0) {
+        const c = UAData.byNo.get(p.hand[idx]);
+        const opt = await p.controller.chooseOption(p, `${unit.card.name}: ลง ${c.name} ลงสนามฟรีไหม?`,
+          [{ label: `ลง ${c.name} (rested)`, value: true }, { label: 'ข้าม', value: false }]);
+        if (opt) await Engine.playCardFromZone(p, p.hand[idx], 'hand', { line: 'energy', active: false });
+      }
+    } else if ((dd = matchDiscardFetch(fx))) {
+      const pred = buildCardPredicate(dd.criteria);
+      const full = c => c && pred(c) && (dd.maxNeed == null || (c.need || 0) <= dd.maxNeed);
+      if (p.sideline.some(no => full(UAData.byNo.get(no)))) {
+        const discarded = await discardFromHand(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อดึงการ์ดจาก Outside Area? (ไม่บังคับ)`);
+        if (discarded) await fetchFromSideline(p, full, `${unit.card.name}: เลือกการ์ดจาก Outside Area`);
+      }
+    } else if ((dd = matchFetchOutside(fx))) {
+      const pred = buildCardPredicate(dd.criteria);
+      await fetchFromSideline(p, c => c && pred(c), `${unit.card.name}: เลือกการ์ดจาก Outside Area เข้ามือ`);
+    }
+  };
+
+  // ---------- generic [When Attacking] patterns ----------
+  const origOnAttack = Effects.onAttack.bind(Effects);
+  Effects.onAttack = async function (G, p, unit) {
+    if (this.registry[unit.no]?.onAttack) return origOnAttack(G, p, unit);
+    const fx = findClause(unit.card.effect, /^\[When Attacking\]/i);
+    if (!fx) return;
+    let m;
+    // "[When Attacking] Draw N card(s), place M card(s) from your hand to the Outside Area."
+    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,\s*(?:place|put) (\d+) cards? from your hand/i))) {
+      draw(p, parseInt(m[1]));
+      log(`[When Attacking] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
+      const toRemoval = /remove area/i.test(fx);
+      for (let i = 0; i < parseInt(m[2]); i++) {
+        if (toRemoval) await manualDiscardToRemoval(p); else await discardFromHand(p);
+      }
+    } else if ((m = matchAttackBuff(fx))) {
+      const pred = buildCardPredicate(m.criteria);
+      const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character' && pred(u.card));
+      if (!units.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, units, `เลือก character รับ +${m.amount} BP เทิร์นนี้`, true);
+      const t = units.find(x => x.uid === uid);
+      if (t) { t.bpMod += m.amount; log(`[When Attacking] ${unit.card.name}: ${t.card.name} +${m.amount} BP เทิร์นนี้`); await Engine.checkBpZero(); }
     }
   };
 
@@ -359,6 +452,112 @@
           `<p class="fx" style="white-space:pre-wrap">${UAData.fxText(card.effect || '')}</p>`);
       }
     }
+  };
+
+  // ---------- generic passive BP bonuses ----------
+  // Conditional always-on BP boosts, re-evaluated live every time Engine.bp() is read:
+  //   "[Your Turn] This character gets +N BP."
+  //   "[Your Turn] If there is a <NAME> on your area, this character gets +N BP."
+  //   "[Your Turn] If there are N or more (other) <Trait:X>/<NAME> cards on your area/Front Line, ..."
+  //   "[Opponent's Turn] This character gets +N BP."
+  //   "If you have N or more cards in your hand, this character gets +N BP."
+  //   "If there are N or more (other) <...> cards on your area/field, this character gets +N BP."
+  // Parsed once per card number and cached (bp() is called from render loops and bot sorting).
+  const bpEvalCache = new Map();
+
+  function parseZone(zoneWord) { return /front/i.test(zoneWord || '') ? 'front' : 'field'; }
+
+  function countMatching(owner, unit, { name, altName, trait, other, zone }) {
+    const pool = zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
+    return pool.filter(u => {
+      if (other && u === unit) return false;
+      if (name) {
+        const hits = n => (u.card.name || '').includes(n) || (u.kw?.alsoTreatedAs || []).some(a => a.includes(n));
+        if (!hits(name) && !(altName && hits(altName))) return false;
+      }
+      if (trait && !(u.card.traits || '').toLowerCase().includes(trait)) return false;
+      return true;
+    }).length;
+  }
+
+  function buildBpEvaluator(card) {
+    const rules = [];
+    for (const clause of (card.effect || '').split('@').map(s => s.trim())) {
+      let m;
+      let when = 'always';
+      let rest = clause;
+      if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
+      else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
+
+      // unconditional: "This character gets/gains +N BP."
+      if ((m = rest.match(/^This character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        if (when !== 'always') rules.push({ when, cond: null, amount: parseInt(m[1]) }); // always-on flat bonus would be printed BP, skip
+        continue;
+      }
+      // "If there is a character with <NAME> in its name on your area, ... +N BP."
+      if ((m = rest.match(/^If there is a character with <([^>]+)>(?: or <([^>]+)>)? in its name (?:on|in) (?:your area|the same line|your field|your Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { name: m[1].trim(), altName: m[2] ? m[2].trim() : null, n: 1, zone: 'field' }, amount: parseInt(m[3]) });
+        continue;
+      }
+      // "If there is a <NAME> on your area/Front Line, this character gets +N BP."
+      if ((m = rest.match(/^If there is an? <([^>]+)> (?:card )?on your (area|field|Front Line)(?: or [^,]+)?, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        const name = m[1].trim();
+        if (/^Trait:?/i.test(name)) {
+          rules.push({ when, cond: { trait: name.replace(/^Trait:?\s*/i, '').toLowerCase(), n: 1, zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
+        } else {
+          rules.push({ when, cond: { name, n: 1, zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
+        }
+        continue;
+      }
+      // "If there are N or more (other) <Trait:X>/<NAME> cards/characters on/in your area/field/Front Line, ... +N BP"
+      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)> (?:cards?|characters?)(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+(\d+) ?(?:BP)?\.?$/i))) {
+        const raw = m[3].trim();
+        const cond = { n: parseInt(m[1]), other: !!m[2], zone: parseZone(m[4]) };
+        if (/^Trait:?/i.test(raw)) cond.trait = raw.replace(/^Trait:?\s*/i, '').toLowerCase();
+        else cond.name = raw;
+        if (/with different names/i.test(rest)) cond.differentNames = true;
+        rules.push({ when, cond, amount: parseInt(m[5]) });
+        continue;
+      }
+      // "If you have N or more cards in your hand, this character gets +N BP."
+      if ((m = rest.match(/^If you have (\d+) or more cards in your hand, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
+        continue;
+      }
+    }
+    if (!rules.length) return null;
+    return (owner, unit) => {
+      const myTurn = Engine.G.players[Engine.G.active] === owner;
+      let total = 0;
+      for (const r of rules) {
+        if (r.when === 'my' && !myTurn) continue;
+        if (r.when === 'opp' && myTurn) continue;
+        if (r.cond) {
+          if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
+          else if (r.cond.differentNames) {
+            const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
+            const names = new Set(pool.filter(u => (!r.cond.other || u !== unit) &&
+              (!r.cond.trait || (u.card.traits || '').toLowerCase().includes(r.cond.trait)) &&
+              (!r.cond.name || (u.card.name || '').includes(r.cond.name))).map(u => u.card.name));
+            if (names.size < r.cond.n) continue;
+          }
+          else if (countMatching(owner, unit, r.cond) < r.cond.n) continue;
+        }
+        total += r.amount;
+      }
+      return total;
+    };
+  }
+
+  Effects.genericBpBonus = function (owner, unit) {
+    if (!bpEvalCache.has(unit.no)) bpEvalCache.set(unit.no, buildBpEvaluator(unit.card));
+    const f = bpEvalCache.get(unit.no);
+    return f ? f(owner, unit) : 0;
+  };
+  // introspection for coverage tooling: does this card's text parse into any passive BP rule?
+  Effects.hasGenericBp = function (card) {
+    if (!bpEvalCache.has(card.no)) bpEvalCache.set(card.no, buildBpEvaluator(card));
+    return !!bpEvalCache.get(card.no);
   };
 
   // ---------- generic [Main] and [On Retire] patterns ----------

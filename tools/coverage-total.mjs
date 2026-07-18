@@ -1,6 +1,5 @@
-// UA SIM - list cards in a given series whose effect text does NOT yet get any
-// automatic handling (registry script / generic pattern / keyword), so a scripting
-// pass can prioritize them without re-deriving what's already covered.
+// UA SIM - aggregate automatic-handling coverage across the entire card database.
+// Same detection logic as uncovered-in-series.mjs but totalled over every series.
 import { readFileSync } from 'fs';
 
 global.window = globalThis;
@@ -50,16 +49,16 @@ function hasKeywordOnly(c) {
     kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.alsoTreatedAs.length || passiveText;
 }
 
-const seriesArg = process.argv[2];
-const cards = UAData.cards.filter(c => c.main && c.series === seriesArg && c.effect && c.effect.trim());
-const uncovered = [];
+const cards = UAData.cards.filter(c => c.main && c.effect && c.effect.trim());
+let covered = 0;
+const bySeries = {};
 
 for (const c of cards) {
-  if (Effects.registry[c.no]) continue;
   let fired = false;
+  if (Effects.registry[c.no]) fired = true;
   const logs = [];
   Engine.G.log = logs;
-  if (c.type === 'Character' || c.type === 'Field') {
+  if (!fired && (c.type === 'Character' || c.type === 'Field')) {
     const p = fakePlayer(), enemy = fakePlayer();
     Engine.G.players = [p, enemy];
     const unit = { no: c.no, card: c, rested: false, under: [], counters: [], bpMod: 0, bpPersist: 0, tempImpact: 0, tempGen: 0, tempDmg: 0 };
@@ -68,23 +67,29 @@ for (const c of cards) {
     if (!fired && Effects.hasMain(c)) fired = true;
     if (!fired && Effects.hasGenericBp?.(c)) fired = true;
     if (!fired) {
-      const logs2 = []; Engine.G.log = logs2;
+      const l2 = []; Engine.G.log = l2;
       try { await Effects.onSideline({}, p, unit, 'effect'); } catch {}
-      if (logs2.length) fired = true;
+      if (l2.length) fired = true;
     }
     if (!fired) {
-      const logs3 = []; Engine.G.log = logs3;
+      const l3 = []; Engine.G.log = l3;
       try { await Effects.onAttack({}, p, unit); } catch {}
-      if (logs3.length) fired = true;
+      if (l3.length) fired = true;
     }
-  } else if (c.type === 'Event') {
+  } else if (!fired && c.type === 'Event') {
     const p = fakePlayer(), enemy = fakePlayer();
     Engine.G.players = [p, enemy];
     try { await Effects.onEvent({}, p, c); } catch {}
     if (logs.length && !logs.some(l => l.includes('manual'))) fired = true;
   }
-  if (!fired && !hasKeywordOnly(c)) uncovered.push(c);
+  if (!fired && hasKeywordOnly(c)) fired = true;
+
+  if (!bySeries[c.series]) bySeries[c.series] = { total: 0, covered: 0 };
+  bySeries[c.series].total++;
+  if (fired) { covered++; bySeries[c.series].covered++; }
 }
 
-console.log(`${seriesArg}: ${cards.length} with effect, ${uncovered.length} uncovered\n`);
-for (const c of uncovered) console.log(`${c.no} | ${c.name} | ${c.type} | ${c.effect.replace(/\n/g, ' ')}`);
+console.log(`TOTAL: ${covered}/${cards.length} (${(100 * covered / cards.length).toFixed(1)}%) cards with effects have automatic handling`);
+const rows = Object.entries(bySeries).sort((a, b) => (a[1].covered / a[1].total) - (b[1].covered / b[1].total));
+console.log('\nworst-covered series (lowest % first):');
+for (const [s, v] of rows.slice(0, 15)) console.log(`  ${s}: ${v.covered}/${v.total} (${(100 * v.covered / v.total).toFixed(0)}%)`);

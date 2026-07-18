@@ -87,8 +87,11 @@ const Engine = (() => {
   }
 
   function bp(unit) {
+    const owner = G.players[findOwnerIdx(unit)];
     const hook = Effects.registry[unit.no]?.bpBonus;
-    const bonus = hook ? (hook(G.players[findOwnerIdx(unit)], unit) || 0) : 0;
+    // per-card script wins; otherwise the generic text-pattern evaluator (set up by common.js)
+    const bonus = hook ? (hook(owner, unit) || 0)
+      : (Effects.genericBpBonus ? (Effects.genericBpBonus(owner, unit) || 0) : 0);
     return Math.max(0, (unit.card.bp || 0) + unit.bpMod + unit.bpPersist + bonus);
   }
 
