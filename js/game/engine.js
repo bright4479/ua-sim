@@ -40,15 +40,33 @@ const Engine = (() => {
       no: cardNo,
       card: c,
       rested: true,          // enters play resting
-      under: [],             // raid stack beneath
-      bpMod: 0,              // manual/effect BP modification (until end of turn it's managed by UI/user)
+      under: [],             // raid stack beneath (covered cards)
+      counters: [],           // face-down cards placed under by effects (deck-sourced, not Raid)
+      bpMod: 0,               // BP modification cleared every End Phase ("during this turn")
+      bpPersist: 0,           // BP modification cleared at owner's next Start Phase ("until start of your next turn")
+      tempImpact: 0,          // extra Impact granted "during this turn"
+      tempDmg: 0,             // Damage(N) override granted "during this turn" (0 = use printed value)
+      tempGen: 0,             // extra energy generation granted "during this turn"
+      retireAtEndOfMain: false, // scheduled self-retire at the end of this Main Phase
       attackedThisTurn: 0,
       blockedThisTurn: 0,
       kw: parseKeywords(c),
     };
   }
 
-  function bp(unit) { return Math.max(0, (unit.card.bp || 0) + unit.bpMod); }
+  function bp(unit) {
+    const hook = Effects.registry[unit.no]?.bpBonus;
+    const bonus = hook ? (hook(G.players[findOwnerIdx(unit)], unit) || 0) : 0;
+    return Math.max(0, (unit.card.bp || 0) + unit.bpMod + unit.bpPersist + bonus);
+  }
+
+  function findOwnerIdx(unit) {
+    for (let i = 0; i < G.players.length; i++) {
+      const p = G.players[i];
+      if (p.front.includes(unit) || p.energy.includes(unit)) return i;
+    }
+    return 0;
+  }
 
   // ---------- game state ----------
   function newPlayer(name, deckNos, controller, isBot) {
@@ -86,18 +104,66 @@ const Engine = (() => {
   function opponentOf(p) { return G.players[1 - G.players.indexOf(p)]; }
 
   // ---------- energy ----------
+  // "If this character is active, increase this character's generated energy by N[color]." — printed
+  // identically (with only the number/color varying) on characters across every series, so it is
+  // handled generically here rather than per-card.
+  const RX_SELF_GEN_WHEN_ACTIVE = /If this character is active, increase this character'?s generated energy by (\d+)/i;
+  function selfGenBonus(u) {
+    if (u.rested) return 0;
+    const m = (u.card.effect || '').match(RX_SELF_GEN_WHEN_ACTIVE);
+    return m ? parseInt(m[1]) : 0;
+  }
   function energyGen(p) {
     const gen = {}; // color -> amount
     for (const u of p.energy) {
       const col = u.card.color || 'None';
-      gen[col] = (gen[col] || 0) + (u.card.gen || 0);
+      const bonus = selfGenBonus(u) + (u.tempGen || 0) + (Effects.registry[u.no]?.genMod?.(u) || 0);
+      gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
     }
     return gen;
   }
+
+  // ---------- dynamic cost reduction ----------
+  // Text-driven, series-agnostic required-energy discounts printed on many cards.
+  function textNeedDelta(p, card) {
+    const fx = card.effect || '';
+    let delta = 0;
+    let m = fx.match(/Reduce the required energy of this card in your hand(?: and Outside Area)? by (\d+)/i);
+    if (m) delta -= parseInt(m[1]);
+    m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
+    if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
+    m = fx.match(/If there is an? (\w+)(?: or (?:an? )?(\w+))? card on your opponent'?s area, reduce this card'?s required energy in your hand by (\d+)/i);
+    if (m) {
+      const enemy = opponentOf(p);
+      const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
+      const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
+      if (hasColor) delta -= parseInt(m[3]);
+    }
+    return delta;
+  }
+  function peekDiscount(p, card) {
+    if (p.pendingDiscount && p.pendingDiscount.predicate(card))
+      return { needDelta: p.pendingDiscount.needDelta || 0, apDelta: p.pendingDiscount.apDelta || 0 };
+    return { needDelta: 0, apDelta: 0 };
+  }
+  function consumeDiscount(p, card) {
+    if (p.pendingDiscount && p.pendingDiscount.predicate(card)) p.pendingDiscount = null;
+  }
+  function effectiveNeed(p, card) {
+    const mod = Effects.registry[card.no]?.costMod?.(p, card) || {};
+    const disc = peekDiscount(p, card);
+    return Math.max(0, (card.need || 0) + textNeedDelta(p, card) + (mod.needDelta || 0) + disc.needDelta);
+  }
+  function effectiveAp(p, card) {
+    const mod = Effects.registry[card.no]?.costMod?.(p, card) || {};
+    const disc = peekDiscount(p, card);
+    return Math.max(0, (card.ap || 0) + (mod.apDelta || 0) + disc.apDelta);
+  }
   function hasEnergyFor(p, c) {
-    if (!c.need) return true;
+    const need = effectiveNeed(p, c);
+    if (!need) return true;
     const gen = energyGen(p);
-    return (gen[c.color] || 0) + (gen['rainbow'] || 0) >= c.need;
+    return (gen[c.color] || 0) + (gen['rainbow'] || 0) >= need;
   }
   function activeAP(p) { return p.apTotal - p.apRested; }
   function payAP(p, n) {
@@ -165,9 +231,14 @@ const Engine = (() => {
   async function startPhase(p) {
     G.phase = 'Start';
     log(`— เทิร์นที่ ${p.turnCount} ของ ${p.name} —`);
-    // 1-2: ready everything
+    // 1: abilities lasting "until the start of your next turn" expire
+    for (const u of [...p.front, ...p.energy]) u.bpPersist = 0;
+    p._getPlayedThisTurn = false;
+    // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
+    for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
+    if (G.over) return;
+    // 2: ready everything
     for (const u of [...p.front, ...p.energy]) { u.rested = false; u.attackedThisTurn = 0; u.blockedThisTurn = 0; }
-    // expire "until start of next turn" – manual BP mods reset conservatively at controller's discretion
     p.apRested = 0;
     // 3: AP count
     p.apTotal = apForTurn(p);
@@ -222,7 +293,7 @@ const Engine = (() => {
         const removedUid = mv.removeUid;
         const ri = toLine.findIndex(x => x.uid === removedUid);
         if (ri < 0) continue;
-        removeToArea(p, toLine[ri], 'removal');
+        await removeToArea(p, toLine[ri], 'removal');
         toLine.splice(ri, 1);
       }
       fromLine.splice(idx, 1);
@@ -230,13 +301,6 @@ const Engine = (() => {
       log(`${p.name} ย้าย ${u.card.name} ไป ${mv.to === 'front' ? 'Front Line' : 'Energy Line'}`);
     }
     update();
-  }
-
-  function removeToArea(p, unit, area) {
-    // raid stack: only top card moves; under-cards go to sideline
-    for (const c of unit.under) p.sideline.push(c);
-    unit.under = [];
-    p[area].push(unit.no);
   }
 
   async function mainPhase(p) {
@@ -264,26 +328,36 @@ const Engine = (() => {
         }
         else if (act.type === 'rest' ) { const u = findUnit(p, act.uid); if (u) u.rested = true; }
         else if (act.type === 'stand') { const u = findUnit(p, act.uid); if (u) u.rested = false; }
-        else if (act.type === 'sideline') { manualZoneMove(p, act.uid, 'sideline'); }
-        else if (act.type === 'removal')  { manualZoneMove(p, act.uid, 'removal'); }
+        else if (act.type === 'sideline') { await manualZoneMove(p, act.uid, 'sideline'); }
+        else if (act.type === 'removal')  { await manualZoneMove(p, act.uid, 'removal'); }
         else if (act.type === 'payap') { payAP(p, act.n || 1); }
       } catch (e) {
         console.error(e);
       }
+      await checkBpZero();
       update();
     }
+    // resolve any "retire this character at the end of your Main Phase" schedules
+    for (const u of [...p.front, ...p.energy]) {
+      if (u.retireAtEndOfMain) {
+        u.retireAtEndOfMain = false;
+        log(`${u.card.name}: ครบกำหนด retire ที่ตั้งไว้ตอน Main Phase`);
+        await sidelineUnit(p, u, 'effect');
+      }
+    }
+    update();
   }
 
   function findUnit(p, uid) {
     return p.front.find(u => u.uid === uid) || p.energy.find(u => u.uid === uid);
   }
 
-  function manualZoneMove(p, uid, area) {
+  async function manualZoneMove(p, uid, area) {
     for (const line of [p.front, p.energy]) {
       const i = line.findIndex(u => u.uid === uid);
       if (i >= 0) {
         const u = line.splice(i, 1)[0];
-        removeToArea(p, u, area);
+        await removeToArea(p, u, area);
         log(`${p.name} ส่ง ${u.card.name} ไป ${area === 'sideline' ? 'Sideline' : 'Removal'}`);
         return;
       }
@@ -299,7 +373,8 @@ const Engine = (() => {
     if (c.type === 'Field' && act.line !== 'energy') throw new Error('Site ลงได้เฉพาะ Energy Line');
     if (c.type !== 'Character' && c.type !== 'Field') throw new Error('ลงสนามได้เฉพาะ Character/Site');
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
-    if (activeAP(p) < (c.ap || 0)) { p.controller.notify?.('AP ไม่พอ'); return; }
+    const apCost = effectiveAp(p, c);
+    if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
 
     const line = act.line === 'front' ? p.front : p.energy;
     if (line.length >= 4) {
@@ -307,10 +382,11 @@ const Engine = (() => {
       const ri = line.findIndex(u => u.uid === act.removeUid);
       if (ri < 0) return;
       const rem = line.splice(ri, 1)[0];
-      removeToArea(p, rem, 'removal');
+      await removeToArea(p, rem, 'removal');
       log(`${p.name} ส่ง ${rem.card.name} ไป Removal (line เต็ม)`);
     }
-    payAP(p, c.ap || 0);
+    payAP(p, apCost);
+    consumeDiscount(p, c);
     p.hand.splice(hi, 1);
     const u = makeUnit(act.no);
     u.rested = true; // enters resting
@@ -327,7 +403,7 @@ const Engine = (() => {
     if (act.no) {
       if (!p.hand.includes(act.no)) return;
       if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
-      if (activeAP(p) < (c.ap || 0)) { p.controller.notify?.('AP ไม่พอ'); return; }
+      if (activeAP(p) < effectiveAp(p, c)) { p.controller.notify?.('AP ไม่พอ'); return; }
       fromHand = true;
     }
     // find target on either of p's lines
@@ -340,12 +416,14 @@ const Engine = (() => {
     const target = targetLine[ti];
 
     if (fromHand) {
-      payAP(p, c.ap || 0);
+      payAP(p, effectiveAp(p, c));
+      consumeDiscount(p, c);
       p.hand.splice(p.hand.indexOf(act.no), 1);
       raider = makeUnit(act.no);
     } else return;
 
     // stack: raider on top, target (and its stack) beneath
+    if (target.counters.length) { p.removal.push(...target.counters); target.counters = []; }
     raider.under = [target.no, ...target.under];
     raider.rested = false;           // if resting -> active (raider arrives active per rule: switch to active)
     targetLine[ti] = raider;
@@ -359,6 +437,7 @@ const Engine = (() => {
         log(`${raider.card.name} ย้ายขึ้น Front Line`);
       }
     }
+    await Effects.onRaided(G, p, target.no, raider);
     await Effects.onPlay(G, p, raider);
     update();
   }
@@ -369,8 +448,10 @@ const Engine = (() => {
     const c = UAData.byNo.get(act.no);
     if (c.type !== 'Event') return;
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
-    if (activeAP(p) < (c.ap || 0)) { p.controller.notify?.('AP ไม่พอ'); return; }
-    payAP(p, c.ap || 0);
+    const apCost = effectiveAp(p, c);
+    if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
+    payAP(p, apCost);
+    consumeDiscount(p, c);
     p.hand.splice(hi, 1);
     log(`${p.name} ใช้ Event: ${c.name}`);
     await Effects.onEvent(G, p, c);
@@ -428,9 +509,10 @@ const Engine = (() => {
         const aBP = bp(atk), dBP = bp(defender);
         log(`⚔ ${atk.card.name} (${aBP}) vs ${defender.card.name} (${dBP})`);
         if (aBP >= dBP) {
-          sidelineUnit(enemy, defender);
+          await sidelineUnit(enemy, defender, 'battle');
           log(`${defender.card.name} แพ้ battle → Sideline`);
-          const impact = atk.kw.nullifiedImpact ? 0 : atk.kw.impact;
+          const impactBonusHook = Effects.registry[atk.no]?.impactBonus?.(p, atk) || 0;
+          const impact = (atk.kw.nullifiedImpact ? 0 : atk.kw.impact) + (atk.tempImpact || 0) + impactBonusHook;
           if (impact > 0 && !defender.kw.nullifyImpact) {
             log(`[Impact ${impact}]!`);
             await dealDamage(p, enemy, impact, atk);
@@ -441,7 +523,7 @@ const Engine = (() => {
         }
       } else {
         // direct damage
-        const dmg = atk.kw.dmg || 1;
+        const dmg = atk.tempDmg || atk.kw.dmg || 1;
         await dealDamage(p, enemy, dmg, atk);
         if (G.over) return;
       }
@@ -453,14 +535,6 @@ const Engine = (() => {
       update();
     }
     update();
-  }
-
-  function sidelineUnit(owner, unit) {
-    for (const line of [owner.front, owner.energy]) {
-      const i = line.indexOf(unit);
-      if (i >= 0) line.splice(i, 1);
-    }
-    removeToArea(owner, unit, 'sideline');
   }
 
   // attacker picks life cards; defender checks triggers
@@ -545,7 +619,7 @@ const Engine = (() => {
         if (cand.length) {
           const uid = await p.controller.chooseEnemyCharacter(p, cand, 'Trigger [Special] — เลือก character ศัตรูเพื่อ retire');
           const u = cand.find(x => x.uid === uid);
-          if (u) { sidelineUnit(enemy, u); log(`Trigger [Special] — ${u.card.name} ถูก retire`); }
+          if (u) { await sidelineUnit(enemy, u, 'effect'); log(`Trigger [Special] — ${u.card.name} ถูก retire`); }
         }
         break;
       }
@@ -555,11 +629,15 @@ const Engine = (() => {
           log(`Trigger [Final] — ${p.name} ได้ Life กลับ 1 ใบ!`);
         }
         break;
-      case 'Color':
-        // card-specific: show text; effect scripting layer may handle known ones
-        log(`Trigger [Color]: ${c.triggerText || '(ดูการ์ด)'} — ทำตามข้อความ (manual)`);
-        await p.controller.manualTrigger?.(p, c);
+      case 'Color': {
+        const h = Effects.registry[c.no]?.onColorTrigger;
+        if (h) { log(`Trigger [Color] — ${c.name}`); await h(G, p, c); }
+        else {
+          log(`Trigger [Color]: ${c.triggerText || '(ดูการ์ด)'} — ทำตามข้อความ (manual)`);
+          await p.controller.manualTrigger?.(p, c);
+        }
         break;
+      }
     }
     update();
   }
@@ -588,6 +666,7 @@ const Engine = (() => {
     }
     if (!targetLine) { p.hand.push(c.no); return; }
     const target = targetLine[ti];
+    if (target.counters.length) { p.removal.push(...target.counters); target.counters = []; }
     const raider = makeUnit(c.no);
     raider.under = [target.no, ...target.under];
     raider.rested = false;
@@ -600,6 +679,7 @@ const Engine = (() => {
         p.front.push(raider);
       }
     }
+    await Effects.onRaided(G, p, target.no, raider);
     await Effects.onPlay(G, p, raider);
   }
 
@@ -615,23 +695,140 @@ const Engine = (() => {
       p.removal.push(no);
       log(`${p.name} ทิ้ง ${UAData.byNo.get(no)?.name} ไป Removal (เกิน 8 ใบ)`);
     }
-    // expire until-end-of-turn BP mods
+    // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) u.bpMod = 0;
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; }
+    p.pendingDiscount = null;
     update();
   }
 
+  // ---------- generic zone helpers (used by the effects layer) ----------
+  // unit must already be spliced out of its line by the caller; places it in `area`
+  // ('sideline' | 'removal') and fires the leave-field / sideline hooks.
+  async function removeToArea(p, unit, area) {
+    for (const c of unit.under) p.sideline.push(c);
+    unit.under = [];
+    if (unit.counters.length) { p.removal.push(...unit.counters); unit.counters = []; }
+    p[area].push(unit.no);
+    await Effects.onLeaveField(G, p, unit);
+    if (area === 'sideline') await Effects.onSideline(G, p, unit, 'effect');
+  }
+
+  // finds & removes `unit` from owner's front/energy line, sends it to Sideline.
+  // reason: 'battle' | 'effect' | 'bp0'
+  async function sidelineUnit(owner, unit, reason = 'effect') {
+    for (const line of [owner.front, owner.energy]) {
+      const i = line.indexOf(unit);
+      if (i >= 0) line.splice(i, 1);
+    }
+    for (const c of unit.under) owner.sideline.push(c);
+    unit.under = [];
+    if (unit.counters.length) { owner.removal.push(...unit.counters); unit.counters = []; }
+    owner.sideline.push(unit.no);
+    await Effects.onLeaveField(G, owner, unit);
+    await Effects.onSideline(G, owner, unit, reason);
+  }
+
+  // returns `unit` from owner's front/energy line back to owner's hand.
+  async function returnUnitToHand(owner, unit) {
+    for (const line of [owner.front, owner.energy]) {
+      const i = line.indexOf(unit);
+      if (i >= 0) line.splice(i, 1);
+    }
+    for (const c of unit.under) owner.sideline.push(c);
+    unit.under = [];
+    if (unit.counters.length) { owner.removal.push(...unit.counters); unit.counters = []; }
+    owner.hand.push(unit.no);
+    await Effects.onLeaveField(G, owner, unit);
+  }
+
+  // moves `unit` to the other line outside of Movement Phase (effect-driven, e.g.
+  // "choose 1 character on your area, move it to another line"). If the destination
+  // is full, `removeUid` (already chosen via the controller) picks the card evicted
+  // to Removal. Returns true on success.
+  async function moveUnitFree(owner, unit, toLine, removeUid) {
+    const from = owner.front.includes(unit) ? owner.front : owner.energy;
+    const dest = toLine === 'front' ? owner.front : owner.energy;
+    if (from === dest) return false;
+    const idx = from.indexOf(unit);
+    if (idx < 0) return false;
+    if (dest.length >= 4) {
+      if (removeUid == null) return false;
+      const ri = dest.findIndex(u => u.uid === removeUid);
+      if (ri < 0) return false;
+      const rem = dest.splice(ri, 1)[0];
+      await removeToArea(owner, rem, 'removal');
+    }
+    from.splice(idx, 1);
+    dest.push(unit);
+    log(`${owner.name}: ${unit.card.name} ย้ายไป ${toLine === 'front' ? 'Front' : 'Energy'} Line`);
+    return true;
+  }
+
+  // plays card `no` from `zone` ('hand' | 'removal') onto owner's line, bypassing the
+  // normal hand-play energy gate (the calling effect script is responsible for any
+  // condition check printed on the card). Optionally spends the card's AP cost.
+  async function playCardFromZone(owner, no, zone, { line = 'energy', active = false, payApCost = false, removeUid } = {}) {
+    const idx = owner[zone].indexOf(no);
+    if (idx < 0) return null;
+    const c = UAData.byNo.get(no);
+    if (!c) return null;
+    const dest = line === 'front' ? owner.front : owner.energy;
+    if (dest.length >= 4) {
+      if (removeUid == null) return null;
+      const ri = dest.findIndex(u => u.uid === removeUid);
+      if (ri < 0) return null;
+      const rem = dest.splice(ri, 1)[0];
+      await removeToArea(owner, rem, 'removal');
+    }
+    if (payApCost && !payAP(owner, c.ap || 0)) return null;
+    owner[zone].splice(idx, 1);
+    const u = makeUnit(no);
+    u.rested = !active;
+    dest.push(u);
+    log(`${owner.name}: ${c.name} ถูกนำลง ${line === 'front' ? 'Front' : 'Energy'} Line จาก${zone === 'hand' ? 'มือ' : 'Outside Area'}`);
+    await Effects.onPlay(G, owner, u);
+    return u;
+  }
+
+  // sidelines any unit whose effective BP has been reduced to 0 or less.
+  async function checkBpZero() {
+    for (const p of G.players) {
+      for (const u of [...p.front, ...p.energy]) {
+        if (u.card.bp != null && bp(u) <= 0) {
+          log(`${u.card.name} BP เหลือ 0 หรือต่ำกว่า → Sideline`);
+          await sidelineUnit(p, u, 'bp0');
+        }
+      }
+    }
+  }
+
   return {
-    G, startGame, energyGen, hasEnergyFor, activeAP, bp, parseKeywords,
+    G, startGame, energyGen, hasEnergyFor, effectiveNeed, effectiveAp, activeAP, bp, parseKeywords,
     raidTargetsFor, opponentOf, findUnit,
     // API for the effects layer
-    draw, log, payAP, sidelineUnit, update,
+    draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
   };
 })();
 
 // ══════════ Effects layer (per-card scripts filled in js/effects/) ══════════
+// registry[cardNo] may define any of:
+//   onPlay(G,p,unit)          — when the card enters the field (normal play or Raid)
+//   onAttack(G,p,unit)        — when the unit declares an attack
+//   onBlock(G,p,unit)         — when the unit is declared as a blocker
+//   onEvent(G,p,card)         — when an Event card is used
+//   onMain(G,p,unit)          — [Activate: Main] ability, invoked by the player via the unit menu
+//   onLeaveField(G,p,unit)    — unit leaves front/energy line for any reason
+//   onSideline(G,p,unit,reason) — unit specifically sidelined ('battle'|'effect'|'bp0')
+//   onTurnStart(G,p,unit)     — start of the unit owner's turn
+//   onRaided(G,p,targetNo,raiderUnit) — fires on the covered card's own script when raided on
+//   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
+//   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
+//   impactBonus(p,unit) -> number   — dynamic passive Impact addition, added when a battle is won
+//   genMod(unit) -> number          — dynamic passive energy-generation addition (energy line only)
+//   costMod(p,card) -> {needDelta,apDelta} — dynamic passive cost modifier while the card is in hand
 const Effects = {
-  registry: {}, // cardNo -> {onPlay, onAttack, onBlock, onEvent}
+  registry: {},
   async onPlay(G, p, unit) {
     const h = this.registry[unit.no]?.onPlay;
     if (h) await h(G, p, unit);
@@ -647,5 +844,25 @@ const Effects = {
   async onEvent(G, p, card) {
     const h = this.registry[card.no]?.onEvent;
     if (h) await h(G, p, card);
+  },
+  // fires whenever `unit` leaves the front/energy line for any reason (sideline, hand, removal)
+  async onLeaveField(G, p, unit) {
+    const h = this.registry[unit.no]?.onLeaveField;
+    if (h) await h(G, p, unit);
+  },
+  // fires specifically when `unit` is sidelined. reason: 'battle' | 'effect' | 'bp0'
+  async onSideline(G, p, unit, reason) {
+    const h = this.registry[unit.no]?.onSideline;
+    if (h) await h(G, p, unit, reason);
+  },
+  // fires for every one of p's own units at the start of p's turn
+  async onTurnStart(G, p, unit) {
+    const h = this.registry[unit.no]?.onTurnStart;
+    if (h) await h(G, p, unit);
+  },
+  // fires on the covered (defending) card's own script when it gets raided on
+  async onRaided(G, p, targetNo, raiderUnit) {
+    const h = this.registry[targetNo]?.onRaided;
+    if (h) await h(G, p, targetNo, raiderUnit);
   },
 };

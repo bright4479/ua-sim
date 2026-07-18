@@ -65,13 +65,16 @@ const GameUI = (() => {
         cardThumb(c) + `<p class="tg">${UAData.fxText(c.triggerText || '')}</p>`,
         '⚡ ใช้ Trigger', 'ไม่ใช้');
     },
-    async chooseOwnCharacter(p, units, prompt) {
-      return await modalChoice(prompt, '', units.map(u =>
-        ({ label: `${u.card.name} (BP ${Engine.bp(u)})${u.rested ? ' [นอน]' : ''}`, value: u.uid })));
+    async chooseOwnCharacter(p, units, prompt, allowSkip = false) {
+      const btns = units.map(u =>
+        ({ label: `${u.card.name} (BP ${Engine.bp(u)})${u.rested ? ' [นอน]' : ''}`, value: u.uid }));
+      if (allowSkip) btns.push({ label: 'ข้าม (ไม่เลือก)', value: null });
+      return await modalChoice(prompt, '', btns);
     },
-    async chooseEnemyCharacter(p, units, prompt) {
-      return await modalChoice(prompt, '', units.map(u =>
-        ({ label: `${u.card.name} (BP ${Engine.bp(u)})`, value: u.uid })));
+    async chooseEnemyCharacter(p, units, prompt, allowSkip = false) {
+      const btns = units.map(u => ({ label: `${u.card.name} (BP ${Engine.bp(u)})`, value: u.uid }));
+      if (allowSkip) btns.push({ label: 'ข้าม (ไม่เลือก)', value: null });
+      return await modalChoice(prompt, '', btns);
     },
     async chooseRaidFromTrigger(p, c, targets) {
       const btns = targets.map(u => ({ label: `⚡ Raid ทับ ${u.card.name}`, value: u.uid }));
@@ -93,6 +96,52 @@ const GameUI = (() => {
         return { label: `${c?.name || no} (E${c?.need ?? '-'})`, value: i };
       });
       return await modalChoice(title, '', btns);
+    },
+    // pick `n` distinct cards from hand (cost payment, e.g. [Discard 2]) — one at a time
+    async chooseCardsFromHand(p, n, title) {
+      const picked = [];
+      const remaining = p.hand.map((no, i) => i);
+      for (let k = 0; k < n && remaining.length; k++) {
+        const btns = remaining.map(i => {
+          const c = UAData.byNo.get(p.hand[i]);
+          return { label: `${c?.name || p.hand[i]} (E${c?.need ?? '-'})`, value: i };
+        });
+        const i = await modalChoice(`${title} (${k + 1}/${n})`, '', btns);
+        if (i == null) break;
+        picked.push(i);
+        remaining.splice(remaining.indexOf(i), 1);
+      }
+      return picked;
+    },
+    // pick 1 card from Removal/Outside Area matching a predicate, or null to skip
+    async chooseCardFromRemoval(p, title, predicate) {
+      const idxs = p.removal.map((no, i) => i).filter(i => !predicate || predicate(UAData.byNo.get(p.removal[i])));
+      if (!idxs.length) return null;
+      const btns = idxs.map(i => {
+        const c = UAData.byNo.get(p.removal[i]);
+        return { label: c?.name || p.removal[i], value: i };
+      });
+      btns.push({ label: 'ไม่เลือก', value: null });
+      return await modalChoice(title, '', btns);
+    },
+    // look-at-top-N flow: choose up to maxPick matching cards to add to hand;
+    // the rest return to the bottom of the deck in their original relative order.
+    async chooseRevealPick(p, revealedNos, title, predicate, maxPick) {
+      const cards = revealedNos.map(no => UAData.byNo.get(no));
+      const body = `<div class="hand-preview">${cards.map(c => UAData.imgTag(c)).join('')}</div>`;
+      const eligible = revealedNos.map((no, i) => i).filter(i => !predicate || predicate(cards[i]));
+      if (!eligible.length) { await modalChoice(title, body, [{ label: 'ไม่มีใบที่ตรงเงื่อนไข — วางคืน', value: null }]); return []; }
+      const picked = [];
+      for (let k = 0; k < maxPick; k++) {
+        const remaining = eligible.filter(i => !picked.includes(i));
+        if (!remaining.length) break;
+        const btns = remaining.map(i => ({ label: cards[i].name, value: i }));
+        btns.push({ label: picked.length ? 'จบการเลือก' : 'ไม่เลือกใบไหนเลย', value: null });
+        const i = await modalChoice(`${title} (เลือกได้สูงสุด ${maxPick})`, body, btns);
+        if (i == null) break;
+        picked.push(i);
+      }
+      return picked;
     },
     async manualTrigger(p, c) {
       await modalConfirm(`Trigger [Color] — ${UAData.escapeHtml(c.name)}`,
@@ -140,7 +189,7 @@ const GameUI = (() => {
     return `<div class="unit ${u.rested ? 'rested' : ''} ${mine ? 'mine' : 'foe'}"
         draggable="${mine}" data-uid="${u.uid}" data-mine="${mine ? 1 : 0}">
       ${UAData.imgTag(u.card)}
-      <div class="unit-bp">${u.card.bp != null ? Engine.bp(u) : ''}${u.bpMod ? `<span class="bpmod">${u.bpMod > 0 ? '+' : ''}${u.bpMod}</span>` : ''}${u.under.length ? `<span class="raidn">⚡${u.under.length}</span>` : ''}</div>
+      <div class="unit-bp">${u.card.bp != null ? Engine.bp(u) : ''}${(u.bpMod || u.bpPersist) ? `<span class="bpmod">${(u.bpMod + u.bpPersist) > 0 ? '+' : ''}${u.bpMod + u.bpPersist}</span>` : ''}${u.under.length ? `<span class="raidn">⚡${u.under.length}</span>` : ''}${u.counters.length ? `<span class="raidn">●${u.counters.length}</span>` : ''}</div>
     </div>`;
   }
 

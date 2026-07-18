@@ -3,6 +3,7 @@
 
 function makeBotController() {
   const delay = ms => new Promise(r => setTimeout(r, ms));
+  let abilityTried = new Set(); // uids already attempted this Main Phase, reset each turn
 
   function evalHand(p) {
     // mulligan if fewer than 2 playable cheap cards
@@ -24,6 +25,7 @@ function makeBotController() {
     },
 
     async chooseMovements(p) {
+      abilityTried = new Set();
       await delay(300);
       const moves = [];
       // move strong attackers from energy to front while keeping >= 2 energy cards
@@ -41,12 +43,20 @@ function makeBotController() {
       await delay(350);
       const G = Engine.G;
 
+      // 0) try any untried [Activate: Main] ability once per turn
+      const abilityUnit = [...p.front, ...p.energy].find(u =>
+        !u.rested && !abilityTried.has(u.uid) && Effects.registry[u.no]?.onMain);
+      if (abilityUnit) {
+        abilityTried.add(abilityUnit.uid);
+        return { type: 'ability', uid: abilityUnit.uid };
+      }
+
       // 1) grow energy line to 4 with cheapest characters / sites
       if (p.energy.length < 4) {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
           .filter(c => c && (c.type === 'Character' || c.type === 'Field'))
-          .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= (c.ap || 0))
+          .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (a.need || 0) - (b.need || 0) || (a.ap || 0) - (b.ap || 0));
         if (candidates.length)
           return { type: 'play', no: candidates[0].no, line: 'energy' };
@@ -58,7 +68,7 @@ function makeBotController() {
         if (!c || c.type !== 'Character') continue;
         const kw = Engine.parseKeywords(c);
         if (!kw.raidTargets.length) continue;
-        if (!Engine.hasEnergyFor(p, c) || Engine.activeAP(p) < (c.ap || 0)) continue;
+        if (!Engine.hasEnergyFor(p, c) || Engine.activeAP(p) < Engine.effectiveAp(p, c)) continue;
         const targets = Engine.raidTargetsFor(p, c);
         if (targets.length) {
           // prefer target on front line
@@ -72,7 +82,7 @@ function makeBotController() {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
           .filter(c => c && c.type === 'Character')
-          .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= (c.ap || 0))
+          .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (b.bp || 0) - (a.bp || 0));
         if (candidates.length && (candidates[0].bp || 0) >= 2000)
           return { type: 'play', no: candidates[0].no, line: 'front' };
@@ -130,7 +140,7 @@ function makeBotController() {
 
     async chooseUseTrigger(p, c) {
       await delay(300);
-      if (c.trigger === 'Color') return false; // unscripted — bot skips
+      if (c.trigger === 'Color' && !Effects.registry[c.no]?.onColorTrigger) return false; // unscripted — bot skips
       return true;
     },
 
@@ -165,6 +175,25 @@ function makeBotController() {
         if ((c?.need || 0) > worstCost) { worstCost = c?.need || 0; worst = i; }
       });
       return worst;
+    },
+
+    async chooseCardsFromHand(p, n, title) {
+      const idxs = p.hand.map((no, i) => i)
+        .sort((a, b) => (UAData.byNo.get(p.hand[b])?.need || 0) - (UAData.byNo.get(p.hand[a])?.need || 0));
+      return idxs.slice(0, Math.min(n, idxs.length));
+    },
+
+    async chooseCardFromRemoval(p, title, predicate) {
+      const idx = p.removal.findIndex((no) => !predicate || predicate(UAData.byNo.get(no)));
+      return idx >= 0 ? idx : null;
+    },
+
+    async chooseRevealPick(p, revealedNos, title, predicate, maxPick) {
+      const picked = [];
+      revealedNos.forEach((no, i) => {
+        if (picked.length < maxPick && (!predicate || predicate(UAData.byNo.get(no)))) picked.push(i);
+      });
+      return picked;
     },
 
     async chooseDiscard(p) {

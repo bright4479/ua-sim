@@ -12,7 +12,8 @@ global.document = { getElementById: () => null, querySelectorAll: () => [], crea
 global.DeckBuilder = { toast: () => {} };
 
 // concatenate so top-level consts share one eval scope, then export to global
-const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js', 'js/effects/mcr.js']
+const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js']
   .map(p => readFileSync(join(ROOT, p), 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;' +
   'globalThis.makeBotController = makeBotController; globalThis.buildBotDeck = buildBotDeck;';
