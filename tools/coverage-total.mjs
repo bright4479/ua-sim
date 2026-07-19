@@ -8,7 +8,7 @@ global.document = { getElementById: () => null, querySelectorAll: () => [], crea
 global.DeckBuilder = { toast: () => {} };
 
 const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
-             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js']
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js']
   .map(p => readFileSync(p, 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;';
 (0, eval)(src);
@@ -46,7 +46,8 @@ function hasKeywordOnly(c) {
   const kw = Engine.parseKeywords(c);
   const passiveText = /if this character is active, increase|generates additional|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card/i.test(c.effect || '');
   return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||
-    kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.alsoTreatedAs.length || passiveText;
+    kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.alsoTreatedAs.length ||
+    kw.frontGen || kw.untargetable || passiveText || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
 }
 
 const cards = UAData.cards.filter(c => c.main && c.effect && c.effect.trim());

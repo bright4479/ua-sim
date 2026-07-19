@@ -81,7 +81,7 @@
 
   async function debuffEnemyFront(p, delta, { persist } = {}) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character');
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable);
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู รับ ${delta} BP`, true);
     const u = units.find(x => x.uid === uid);
@@ -94,7 +94,7 @@
 
   async function restEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested &&
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable &&
       (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, 'เลือก character ศัตรูให้วางนอน', true);
@@ -105,7 +105,7 @@
 
   async function retireEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && (bpLimit == null || Engine.bp(u) <= bpLimit));
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู (BP ${bpLimit ?? '-'} หรือน้อยกว่า) ให้ retire`, true);
     const u = units.find(x => x.uid === uid);
@@ -181,12 +181,12 @@
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     apActive: /^Choose up to (\d+) of your? AP [Cc]ards and (?:(?:set|switch) (?:it|them) to active|active (?:it|them))\.?$/i,
-    onplayBuffOther: /^\[On Play\]\s*Choose up to 1 (other )?character on your area, it (?:gets|gains) \+(\d+) BP during this turn\.?$/i,
+    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your area)?,?\s*(?:it (?:gets|gains)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line, it (?:gets|gains) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 other character on your (?:area|field),?\s*(?:it (?:gets|gains)|give (?:it|them|it a)) \+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 (?:of your )?other [Cc]haracters?(?: on your (?:area|field))?,?\s*(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
@@ -207,6 +207,7 @@
     t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
     t = t.replace(/\ba card\b/gi, '1 card');
     t = t.replace(/\buntil the end of the turn\b/gi, 'during this turn');
+    t = t.replace(/\bfor the turn\b/gi, 'during this turn');
     t = t.replace(/(\d)BP\b/g, '$1 BP');                      // "+1000BP" / "3000BP or less" -> spaced
     t = t.replace(/\b(gains|gets) (\d+) ?BP\b/gi, '$1 +$2 BP');
     t = t.replace(/\bwith (\d+) BP or (less|more)\b/gi, 'with BP $1 or $2');
@@ -378,13 +379,14 @@
   }
   async function bounceEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && (bpLimit == null || Engine.bp(u) <= bpLimit));
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู (BP ${bpLimit ?? '-'} หรือน้อยกว่า) กลับมือ`, true);
     const u = units.find(x => x.uid === uid);
     if (u) { await Engine.returnUnitToHand(enemy, u); log(`${p.name}: ${u.card.name} ถูกส่งกลับมือ`); }
     return u;
   }
+  Object.assign(window.UAEffectHelpers, { bounceEnemyFront });
 
   const origOnPlay = Effects.onPlay.bind(Effects);
   Effects.onPlay = async function (G, p, unit) {
@@ -474,7 +476,7 @@
       return;
     }
     // "[When Attacking] Draw N card(s), place M card(s) from your hand to the Outside Area."
-    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,\s*(?:place|put) (\d+) cards? from your hand/i))) {
+    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,?\s*(?:then\s*)?(?:place|put) (\d+) cards? from (?:your )?hand/i))) {
       draw(p, parseInt(m[1]));
       log(`[When Attacking] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
       const toRemoval = /remove area/i.test(fx);
@@ -651,6 +653,65 @@
     return !!genEvalCache.get(card.no);
   };
 
+  // ---------- generic "also generates energy on the Front Line" (conditional) ----------
+  // The unconditional form ("This character also generates energy on the Front Line.", printed
+  // with no gating clause) is handled as a static keyword (kw.frontGen, parsed in engine.js) since
+  // it never changes. This evaluator covers the live-conditional self forms — re-checked every
+  // time Engine.energyGen() reads the front line, same pattern as genericBpBonus.
+  const frontGenEvalCache = new Map();
+  function buildFrontGenEvaluator(card) {
+    const grantTail = '(?:generates? energy (?:on|when in) (?:your |the )?Front Line|["“]This character (?:also |can )?generates? energy (?:on|when in) (?:your |the )?Front Line["”]?)\\.?$';
+    for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
+      let rest = clause;
+      let when = 'always';
+      let m;
+      if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
+      else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
+
+      // "If there is another character on the/your Front Line, this character also generates..."
+      if (new RegExp('^If there is another character on (?:the|your) Front Line, this character (?:also |can )?' + grantTail, 'i').test(rest))
+        return (owner, unit) => owner.front.some(u => u !== unit);
+
+      // "If there is a character with "NAME" in its name [and a character with "NAME2" in its
+      // name] on/in your area, this character gains/gets '...generates energy on Front Line...'"
+      m = rest.match(/^If there is a character with ["“]([^"”]+)["”] in its name(?: and a character with ["“]([^"”]+)["”] in its name)? (?:on|in) your area, this character (?:gets|gains) /i);
+      if (m && new RegExp(grantTail, 'i').test(rest)) {
+        const n1 = m[1].trim(), n2 = m[2] ? m[2].trim() : null;
+        return (owner) => {
+          const pool = [...owner.front, ...owner.energy];
+          const hit = n => pool.some(u => (u.card.name || '').includes(n));
+          return hit(n1) && (!n2 || hit(n2));
+        };
+      }
+
+      // "If there is a <NAME> (on|in) your area/Outside Area, this character gets/gains '...Front Line...'"
+      m = rest.match(/^If there is an? <([^>]+)> (?:on|in) your area, this character (?:gets|gains) /i);
+      if (m && new RegExp(grantTail, 'i').test(rest)) {
+        const name = m[1].trim();
+        return (owner) => [...owner.front, ...owner.energy].some(u => (u.card.name || '').includes(name));
+      }
+
+      // "If there are N or more (other) <Trait:X> cards on your area, this character (also/can)
+      // generates energy on the Front Line" (mirrors the plain-BP evaluator's count-gate)
+      m = rest.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?) (?:on|in) your area, this character (?:also |can )?/i);
+      if (m && new RegExp(grantTail, 'i').test(rest)) {
+        const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase();
+        return (owner, unit) => [...owner.front, ...owner.energy].filter(u =>
+          (!other || u !== unit) && (u.card.traits || '').toLowerCase().includes(trait)).length >= need;
+      }
+    }
+    return null;
+  }
+  Effects.genericFrontGen = function (owner, unit) {
+    if (!frontGenEvalCache.has(unit.no)) frontGenEvalCache.set(unit.no, buildFrontGenEvaluator(unit.card));
+    const f = frontGenEvalCache.get(unit.no);
+    return f ? !!f(owner, unit) : false;
+  };
+  Effects.hasGenericFrontGen = function (card) {
+    if (!frontGenEvalCache.has(card.no)) frontGenEvalCache.set(card.no, buildFrontGenEvaluator(card));
+    return !!frontGenEvalCache.get(card.no);
+  };
+
   // ---------- generic [Main] and [On Retire] patterns ----------
   function matchOnMain(card) {
     const fx = findClause(card.effect, /^\[Main\]/i);
@@ -731,7 +792,7 @@
     let m = fx.match(RX.onRetireDraw);
     if (m) { draw(p, parseInt(m[1])); log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`); return; }
     // "[On Retire] Draw N card(s), place M card(s) from your hand to the Outside Area."
-    if ((m = fx.match(/^\[On Retire\]\s*Draw (\d+)(?: cards?)?(?:,| and| then|, then)\s*(?:place|put) (\d+) cards? from your hand/i))) {
+    if ((m = fx.match(/^\[On Retire\]\s*Draw (\d+)(?: cards?)?(?:,| and| then|, then)\s*(?:place|put) (\d+) cards? from (?:your )?hand/i))) {
       draw(p, parseInt(m[1]));
       log(`[On Retire] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
       const toRemoval = /remove area/i.test(fx);

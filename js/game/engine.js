@@ -21,6 +21,8 @@ const Engine = (() => {
       entersActiveIf: null,      // conditional variant: {kind:'name'|'traitCount', ...}
       unblockableBP: null,       // "This character cannot be blocked by characters with BP N or less."
       alsoTreatedAs: [],         // "This card is also treated as <NAME>" — for Raid name-matching
+      frontGen: false,           // "This character also generates energy on the Front Line." (unconditional)
+      untargetable: false,       // "cannot be chosen by your opponent's (character's) effect / Event Card" (approximated as full immunity)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -49,8 +51,21 @@ const Engine = (() => {
     const unblock = fx.match(/cannot be blocked by characters with (?:BP (\d+)|(\d+) ?BP) or less/i);
     if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
-    const treated = fx.matchAll(/This (?:card|character) is also treated as <([^>]+)>/gi);
+    const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
+    // "This character (also/can) generates energy on/when in (your/the) Front Line." (unconditional,
+    // self, printed as its own clause — conditional/granted-to-others variants are handled by
+    // Effects.genericFrontGen in common.js, evaluated live)
+    for (const clause of fx.split('@')) {
+      if (/^\s*\d*\s*This character (?:also |can )?generates? energy (?:on|when in) (?:your |the )?Front Line\.?\s*$/i.test(clause.trim())) {
+        kw.frontGen = true;
+        break;
+      }
+    }
+    // "cannot be chosen by your opponent's character's effect / Event Card (from hand) / effect" —
+    // approximated as blanket immunity from opponent targeting (a slight over-grant when the
+    // printed text is actually scoped to only Character-effects or only Event-cards, but safe).
+    if (/cannot be chosen by your opponent'?s (?:character'?s effect|event card(?: from hand)?|event'?s effect|effect)/i.test(fx)) kw.untargetable = true;
     return kw;
   }
 
@@ -82,7 +97,11 @@ const Engine = (() => {
       tempImpact: 0,          // extra Impact granted "during this turn"
       tempDmg: 0,             // Damage(N) override granted "during this turn" (0 = use printed value)
       tempGen: 0,             // extra energy generation granted "during this turn"
+      tempFrontGen: false,    // granted front-line energy generation "during this turn"
+      frontGenPersist: false, // granted front-line energy generation "until start of your next turn"
       retireAtEndOfMain: false, // scheduled self-retire at the end of this Main Phase
+      retireAtEndOfTurn: false, // scheduled self-retire at the beginning of this End Phase
+      noBlock: false,           // "cannot block during this turn" (cleared every End Phase)
       attackedThisTurn: 0,
       blockedThisTurn: 0,
       kw: parseKeywords(c),
@@ -162,16 +181,27 @@ const Engine = (() => {
     if (RX_SELF_GEN_NO_NUM.test(fx)) return 1;
     return 0;
   }
+  function addUnitGen(gen, p, u) {
+    const col = u.card.color || 'None';
+    const hook = Effects.registry[u.no]?.genMod;
+    const modBonus = hook ? (hook(u) || 0)
+      : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
+    const bonus = selfGenBonus(u) + (u.tempGen || 0) + modBonus;
+    gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
+  }
+  // "This character also generates energy on the Front Line" — printed unconditionally (kw.frontGen),
+  // granted temporarily by another effect (tempFrontGen/frontGenPersist), or conditionally live
+  // (Effects.genericFrontGen, set up by common.js from the card's own text).
+  function hasFrontGen(p, u) {
+    const hook = Effects.registry[u.no]?.frontGenBonus;
+    if (hook) return !!hook(p, u);
+    return u.kw.frontGen || u.tempFrontGen || u.frontGenPersist ||
+      (typeof Effects !== 'undefined' && Effects.genericFrontGen ? Effects.genericFrontGen(p, u) : false);
+  }
   function energyGen(p) {
     const gen = {}; // color -> amount
-    for (const u of p.energy) {
-      const col = u.card.color || 'None';
-      const hook = Effects.registry[u.no]?.genMod;
-      const modBonus = hook ? (hook(u) || 0)
-        : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
-      const bonus = selfGenBonus(u) + (u.tempGen || 0) + modBonus;
-      gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
-    }
+    for (const u of p.energy) addUnitGen(gen, p, u);
+    for (const u of p.front) if (hasFrontGen(p, u)) addUnitGen(gen, p, u);
     return gen;
   }
 
@@ -221,6 +251,20 @@ const Engine = (() => {
     const m = fx.match(/If there is a <([^>]+)> on your area, reduce the AP cost of this card in your hand by (\d+)/i);
     if (m && [...p.front, ...p.energy].some(u => (u.card.name || '').includes(m[1]))) return -parseInt(m[2]);
     return 0;
+  }
+  // does this card's own text carry ANY of the hand-based cost-discount patterns above,
+  // regardless of whether the condition currently holds? Used only by the coverage-measurement
+  // tools (tools/uncovered-in-series.mjs, tools/coverage-total.mjs) so cards whose only effect is
+  // an automatically-applied cost discount aren't misreported as "uncovered".
+  function hasTextCostDiscount(card) {
+    const fx = card.effect || '';
+    return /Reduce the required energy of this card in your hand(?: and Outside Area)? by \d+/i.test(fx) ||
+      /If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by \d+/i.test(fx) ||
+      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
+      /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
+      /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
+      /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||
+      /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx);
   }
   function peekDiscount(p, card) {
     if (p.pendingDiscount && p.pendingDiscount.predicate(card))
@@ -313,9 +357,10 @@ const Engine = (() => {
     G.phase = 'Start';
     log(`— เทิร์นที่ ${p.turnCount} ของ ${p.name} —`);
     // 1: abilities lasting "until the start of your next turn" expire
-    for (const u of [...p.front, ...p.energy]) u.bpPersist = 0;
+    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; }
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
+    p._playedTraitsThisTurn = new Set();
     G.retiredThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
@@ -344,6 +389,12 @@ const Engine = (() => {
     update();
   }
 
+  // records the traits of a card played from hand this turn (for "if you used/played a Trait:X
+  // card from your hand during this turn" conditions). Reset each Start Phase.
+  function trackPlayedTraits(p, c) {
+    for (const t of (c.traits || '').split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean))
+      p._playedTraitsThisTurn.add(t);
+  }
   function draw(p, n) {
     for (let i = 0; i < n; i++) {
       if (p.deck.length === 0) {
@@ -471,6 +522,7 @@ const Engine = (() => {
     payAP(p, apCost);
     consumeDiscount(p, c);
     p.hand.splice(hi, 1);
+    trackPlayedTraits(p, c);
     const u = makeUnit(act.no);
     u.rested = !shouldEnterActive(p, u.kw); // enters resting, unless "played in active"
     line.push(u);
@@ -502,6 +554,7 @@ const Engine = (() => {
       payAP(p, effectiveAp(p, c));
       consumeDiscount(p, c);
       p.hand.splice(p.hand.indexOf(act.no), 1);
+      trackPlayedTraits(p, c);
       raider = makeUnit(act.no);
     } else return;
 
@@ -536,6 +589,7 @@ const Engine = (() => {
     payAP(p, apCost);
     consumeDiscount(p, c);
     p.hand.splice(hi, 1);
+    trackPlayedTraits(p, c);
     log(`${p.name} ใช้ Event: ${c.name}`);
     await Effects.onEvent(G, p, c);
     p.sideline.push(act.no);
@@ -567,7 +621,7 @@ const Engine = (() => {
       // blocking (not allowed vs snipe-target attacks)
       let blocker = null;
       if (!targetUnit) {
-        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' &&
+        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock &&
           (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP));
         if (candidates.length) {
           const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
@@ -577,7 +631,7 @@ const Engine = (() => {
               blocker.rested = true;
               blocker.blockedThisTurn++;
               log(`${enemy.name}: ${blocker.card.name} บล็อก!`);
-              await Effects.onBlock(G, enemy, blocker);
+              await Effects.onBlock(G, enemy, blocker, atk);
               if (blocker.kw.doubleBlock && blocker.blockedThisTurn === 1) {
                 blocker.rested = false;
                 log(`[Double Block] ${blocker.card.name} กลับเป็น Active`);
@@ -606,8 +660,23 @@ const Engine = (() => {
             await dealDamage(p, enemy, impact, atk);
             if (G.over) return;
           }
+          // temporary "when this character attacks and wins a battle, draw 1 card" grant (from
+          // another card's effect, not this unit's own printed text)
+          if (atk._grantedOnWinDraw) { draw(p, 1); log(`${atk.card.name}: จั่ว 1 ใบ (ได้รับความสามารถชั่วคราว)`); }
+          // Field/other-unit passive watchers: "[1 Per Turn] When a character from your area
+          // attacks and wins a battle, draw 1 card." — not keyed to the attacker's own card no.
+          for (const u of [...p.front, ...p.energy]) {
+            const h = Effects.registry[u.no]?.onAnyWinBattle;
+            if (h) await h(G, p, atk, enemy, defender, u);
+          }
         } else {
           log(`${atk.card.name} แพ้ battle (ไม่ถูก sideline)`);
+          // Field/other-unit passive watchers: "[1 Per Turn] When a character on your area
+          // attacks and loses a battle, ..." — not keyed to the attacker's own card no.
+          for (const u of [...p.front, ...p.energy]) {
+            const h = Effects.registry[u.no]?.onAnyLoseBattle;
+            if (h) await h(G, p, atk, enemy, defender, u);
+          }
         }
       } else {
         // direct damage
@@ -774,6 +843,14 @@ const Engine = (() => {
   async function endPhase(p) {
     G.phase = 'End';
     update();
+    // "at the beginning of the End Phase, retire that character" schedules
+    for (const u of [...p.front, ...p.energy]) {
+      if (u.retireAtEndOfTurn) {
+        u.retireAtEndOfTurn = false;
+        log(`${u.card.name}: ครบกำหนด retire ที่ตั้งไว้ตอน End Phase`);
+        await sidelineUnit(p, u, 'effect');
+      }
+    }
     // ready characters/sites (AP stays)
     for (const u of [...p.front, ...p.energy]) u.rested = false;
     // hand limit 8 -> removal
@@ -785,7 +862,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; }
     p.pendingDiscount = null;
     update();
   }
@@ -812,10 +889,20 @@ const Engine = (() => {
     }
     for (const c of unit.under) owner.sideline.push(c);
     unit.under = [];
-    if (unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
+    // per-card hook to inspect/redistribute counters BEFORE the generic auto-dump (needed for
+    // "[On Retire] look at the cards under this character..." effects) — returns true if it
+    // already handled unit.counters itself, skipping the default dump-to-sideline.
+    const handled = unit.counters.length && await Effects.onBeforeLeaveCounters(G, owner, unit, reason);
+    if (!handled && unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
     owner.sideline.push(unit.no);
     await Effects.onLeaveField(G, owner, unit);
     await Effects.onSideline(G, owner, unit, reason);
+    // per-unit reactive watchers (e.g. "when THIS opponent's character retires, do X"), registered
+    // ad-hoc via `(unit._watchers ||= []).push(fn)` by whatever effect marked this specific unit —
+    // not tied to the unit's card number, so it survives Raid-covering and works cross-player.
+    if (unit._watchers) {
+      for (const fn of unit._watchers) { try { await fn(G, owner, unit, reason); } catch (e) { console.error(e); } }
+    }
   }
 
   // returns `unit` from owner's front/energy line back to owner's hand.
@@ -895,7 +982,7 @@ const Engine = (() => {
 
   return {
     G, startGame, energyGen, hasEnergyFor, effectiveNeed, effectiveAp, activeAP, bp, parseKeywords,
-    raidTargetsFor, opponentOf, findUnit,
+    raidTargetsFor, opponentOf, findUnit, hasTextCostDiscount,
     // API for the effects layer
     draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
   };
@@ -927,9 +1014,9 @@ const Effects = {
     const h = this.registry[unit.no]?.onAttack;
     if (h) await h(G, p, unit);
   },
-  async onBlock(G, p, unit) {
+  async onBlock(G, p, unit, atkUnit) {
     const h = this.registry[unit.no]?.onBlock;
-    if (h) await h(G, p, unit);
+    if (h) await h(G, p, unit, atkUnit);
   },
   async onEvent(G, p, card) {
     const h = this.registry[card.no]?.onEvent;
@@ -959,6 +1046,14 @@ const Effects = {
   async onRaided(G, p, targetNo, raiderUnit) {
     const h = this.registry[targetNo]?.onRaided;
     if (h) await h(G, p, targetNo, raiderUnit);
+  },
+  // fires just before sidelineUnit auto-dumps unit.counters to the sideline; a script that wants
+  // to redistribute them itself (e.g. "[On Retire] look at the cards under this character, add 1
+  // to hand and the rest to Outside Area") should mutate unit.counters and return true to skip
+  // the automatic dump.
+  async onBeforeLeaveCounters(G, p, unit, reason) {
+    const h = this.registry[unit.no]?.onBeforeLeaveCounters;
+    return h ? !!(await h(G, p, unit, reason)) : false;
   },
   // predicate: does this card have SOME [Activate: Main] ability available (registry script or a
   // generic pattern)? Used by the UI/bot to decide whether to show/attempt the ability at all,
