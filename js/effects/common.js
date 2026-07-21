@@ -421,7 +421,30 @@
     if (u) { await Engine.returnUnitToHand(enemy, u); log(`${p.name}: ${u.card.name} ถูกส่งกลับมือ`); }
     return u;
   }
-  Object.assign(window.UAEffectHelpers, { bounceEnemyFront });
+  // "un-raids" the top layer of a Raid-stacked unit: the current top card goes to Outside Area,
+  // revealing whatever card was stacked underneath (which becomes the new live unit, keeping the
+  // same uid so board position/UI stays stable). Returns the newly-exposed unit, or null if
+  // `unit` had no Raid stack (`.under` empty).
+  async function unraidTopLayer(owner, unit) {
+    if (!unit.under.length) return null;
+    const lineArr = owner.front.includes(unit) ? owner.front : owner.energy;
+    const idx = lineArr.indexOf(unit);
+    if (idx < 0) return null;
+    const newNo = unit.under.shift();
+    owner.sideline.push(unit.no);
+    const newUnit = {
+      uid: unit.uid, no: newNo, card: UAData.byNo.get(newNo), rested: unit.rested, under: unit.under,
+      counters: [], bpMod: 0, bpPersist: 0, tempImpact: 0, tempDmg: 0, tempGen: 0, tempFrontGen: false,
+      frontGenPersist: false, retireAtEndOfMain: false, retireAtEndOfTurn: false, noBlock: false,
+      skipNextStand: false, noRetire: false, tempSnipe: false, tempUnblockableBP: null, tempUnblockableBPMin: null,
+      effectsNullified: false, enteredTurn: Engine.G.turn, attackedThisTurn: 0, blockedThisTurn: 0,
+      kw: Engine.parseKeywords(UAData.byNo.get(newNo)),
+    };
+    lineArr[idx] = newUnit;
+    log(`${owner.name}: ${unit.card.name} ถูกส่งไป Outside Area เผย ${newUnit.card.name}`);
+    return newUnit;
+  }
+  Object.assign(window.UAEffectHelpers, { bounceEnemyFront, unraidTopLayer });
 
   const origOnPlay = Effects.onPlay.bind(Effects);
   Effects.onPlay = async function (G, p, unit) {
@@ -503,6 +526,7 @@
   // ---------- generic [When Attacking] patterns ----------
   const origOnAttack = Effects.onAttack.bind(Effects);
   Effects.onAttack = async function (G, p, unit) {
+    if (unit.effectsNullified) return;
     if (this.registry[unit.no]?.onAttack) return origOnAttack(G, p, unit);
     const fx = findClause(unit.card.effect, /^\[When Attacking\]/i);
     if (!fx) return;
@@ -789,7 +813,7 @@
     if ((m = fx.match(RX_SELF_GEN_RETIRE))) return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if (fx.match(RX_SELF_GEN_RETIRE2)) return { kind: 'selfGenRetire', n: 1 };
     // HTR-style: "This character generates 1 additional [blue] energy. At the end of the main phase, retire this character."
-    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character generates (\d+) additional (?:\[?\w+\]?\s*)?energy\.?\s*At the end of the [Mm]ain [Pp]hase, retire this character\.?$/i)))
+    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character generates (\d+) additional (?:\[?\w+\]?\s*)?energy\.?\s*At the end of the [Mm]ain [Pp]hase, retire this character\.?$/i)))
       return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainDiscardImpact))) return { kind: 'discardImpact', discardN: parseInt(m[1]), impact: parseInt(m[2]) };
@@ -808,6 +832,7 @@
 
   const origOnMain = Effects.onMain.bind(Effects);
   Effects.onMain = async function (G, p, unit) {
+    if (unit.effectsNullified) return;
     if (this.registry[unit.no]?.onMain) return origOnMain(G, p, unit);
     const mm = matchOnMain(unit.card);
     if (!mm) return;

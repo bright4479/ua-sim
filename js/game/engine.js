@@ -20,6 +20,7 @@ const Engine = (() => {
       entersActive: false,       // "This character/Field is played in active."
       entersActiveIf: null,      // conditional variant: {kind:'name'|'traitCount', ...}
       unblockableBP: null,       // "This character cannot be blocked by characters with BP N or less."
+      unblockableBPMin: null,    // "This character cannot be blocked by characters with BP N or more."
       alsoTreatedAs: [],         // "This card is also treated as <NAME>" — for Raid name-matching
       frontGen: false,           // "This character also generates energy on the Front Line." (unconditional)
       untargetable: false,       // "cannot be chosen by your opponent's (character's) effect / Event Card" (approximated as full immunity)
@@ -40,6 +41,7 @@ const Engine = (() => {
     // active." / "Play this character set to active."
     if (/Play this (?:field|site|character|card) (?:to your area )?(?:in active|set to active)/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) comes (?:in)?to play as [Aa]ctive/i.test(fx)) kw.entersActive = true;
+    if (/This (?:field|site|character|card) is active when played (?:onto|to|in) (?:the|your) (?:field|area)/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)
     if (/(?:this character|this field|this card) is played in active/i.test(fx)) {
       const nameCond = fx.match(/If there is a character on your area that includes <([^>]+)> in its name, (?:this character|this field) is played in active/i);
@@ -49,8 +51,11 @@ const Engine = (() => {
       else kw.entersActive = true;
     }
     // "This character cannot be blocked by characters with BP N or less." (or "N BP or less")
-    const unblock = fx.match(/cannot be blocked by characters with (?:BP (\d+)|(\d+) ?BP) or less/i);
+    const unblock = fx.match(/cannot be blocked by characters with (?:BP ?(\d+)|(\d+) ?BP) or less/i);
     if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2]);
+    // ... or "BP N or more" — the opposite direction (only weak characters may block).
+    const unblockMin = fx.match(/cannot be blocked by characters with (?:BP ?(\d+)|(\d+) ?BP) or more/i);
+    if (unblockMin) kw.unblockableBPMin = parseInt(unblockMin[1] || unblockMin[2]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -103,6 +108,8 @@ const Engine = (() => {
       retireAtEndOfMain: false, // scheduled self-retire at the end of this Main Phase
       retireAtEndOfTurn: false, // scheduled self-retire at the beginning of this End Phase
       noBlock: false,           // "cannot block during this turn" (cleared every End Phase)
+      effectsNullified: false, // "loses all of its (original) effects during this turn" — suppresses
+                                // registry/generic onPlay/onAttack/onMain and bp/gen bonuses for this unit
       skipNextStand: false,     // "the next time it would set to active, it doesn't" — consumed by
                                  // whichever ready-up step (this End Phase or owner's next Start Phase) comes first
       noRetire: false,          // "this character will not be retired" (cleared every End Phase)
@@ -121,7 +128,8 @@ const Engine = (() => {
     const owner = G.players[findOwnerIdx(unit)];
     const hook = Effects.registry[unit.no]?.bpBonus;
     // per-card script wins; otherwise the generic text-pattern evaluator (set up by common.js)
-    const bonus = hook ? (hook(owner, unit) || 0)
+    // — suppressed entirely if this unit "lost all of its effects" this turn.
+    const bonus = unit.effectsNullified ? 0 : hook ? (hook(owner, unit) || 0)
       : (Effects.genericBpBonus ? (Effects.genericBpBonus(owner, unit) || 0) : 0);
     // aura bonuses granted by units on the same player's field ("All your <X> characters get
     // +N BP") — auraBp(owner, sourceUnit, targetUnit) on the SOURCE card's registry entry.
@@ -185,6 +193,7 @@ const Engine = (() => {
     /If this character is active, increase this character'?s generated energy by (\d+)/i,
     /If this (?:character|card) is active, increase the energy it generates by (\d+)/i,
     /If this character is active, this character generates addition\w* \+?(\d+)/i,
+    /If this character is active, this character generates (\d+) addition\w*/i,
   ];
   // newer-series wording without a number ("it gains [purple] energy generation") — always +1
   const RX_SELF_GEN_NO_NUM = /If this (?:character|card) is active, it gains \[?\w+\]? energy generation/i;
@@ -201,9 +210,9 @@ const Engine = (() => {
   function addUnitGen(gen, p, u) {
     const col = u.card.color || 'None';
     const hook = Effects.registry[u.no]?.genMod;
-    const modBonus = hook ? (hook(u, p) || 0)
+    const modBonus = u.effectsNullified ? 0 : hook ? (hook(u, p) || 0)
       : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
-    const bonus = selfGenBonus(u) + (u.tempGen || 0) + modBonus;
+    const bonus = (u.effectsNullified ? 0 : selfGenBonus(u)) + (u.tempGen || 0) + modBonus;
     gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
   }
   // "This character also generates energy on the Front Line" — printed unconditionally (kw.frontGen),
@@ -653,6 +662,7 @@ const Engine = (() => {
       if (!targetUnit) {
         const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock &&
           (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP) &&
+          (atk.kw.unblockableBPMin == null || bp(u) < atk.kw.unblockableBPMin) &&
           (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
           (atk.tempUnblockableBPMin == null || bp(u) < atk.tempUnblockableBPMin));
         if (candidates.length) {
@@ -703,6 +713,12 @@ const Engine = (() => {
           }
         } else {
           log(`${atk.card.name} แพ้ battle (ไม่ถูก sideline)`);
+          // the defender (usually a blocker) "wins" this battle — fires on the DEFENDER's own
+          // registry entry, e.g. "[Opponent's Turn] When this character wins a battle, draw 1 card."
+          if (defender) {
+            const dh = Effects.registry[defender.no]?.onDefenderWinBattle;
+            if (dh) await dh(G, enemy, defender, p, atk);
+          }
           // Field/other-unit passive watchers: "[1 Per Turn] When a character on your area
           // attacks and loses a battle, ..." — not keyed to the attacker's own card no.
           for (const u of [...p.front, ...p.energy]) {
@@ -896,7 +912,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; }
     p.pendingDiscount = null;
     update();
   }
@@ -1036,6 +1052,8 @@ const Engine = (() => {
 //   onTurnStart(G,p,unit)     — start of the unit owner's turn
 //   onRaided(G,p,targetNo,raiderUnit) — fires on the covered card's own script when raided on
 //   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
+//   onDefenderWinBattle(G,p,unit,atkP,atkUnit) — fires on a successful BLOCKER's own card (the
+//     attacker's BP was not enough), e.g. "[Opponent's Turn] When this character wins a battle, ..."
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
 //   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
 //                                     same field ("All your <X> get +N BP"); must not call Engine.bp()
@@ -1047,14 +1065,17 @@ const Engine = (() => {
 const Effects = {
   registry: {},
   async onPlay(G, p, unit) {
+    if (unit.effectsNullified) return;
     const h = this.registry[unit.no]?.onPlay;
     if (h) await h(G, p, unit);
   },
   async onAttack(G, p, unit) {
+    if (unit.effectsNullified) return;
     const h = this.registry[unit.no]?.onAttack;
     if (h) await h(G, p, unit);
   },
   async onBlock(G, p, unit, atkUnit) {
+    if (unit.effectsNullified) return;
     const h = this.registry[unit.no]?.onBlock;
     if (h) await h(G, p, unit, atkUnit);
   },
@@ -1064,6 +1085,7 @@ const Effects = {
   },
   // [Activate: Main] ability, invoked by the player via the unit menu
   async onMain(G, p, unit) {
+    if (unit.effectsNullified) return;
     const h = this.registry[unit.no]?.onMain;
     if (h) await h(G, p, unit);
   },
