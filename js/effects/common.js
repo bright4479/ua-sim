@@ -195,11 +195,11 @@
   // doesn't silently break the whole pattern.
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    apActive: /^Choose up to (\d+) of your? AP [Cc]ards and (?:(?:set|switch) (?:it|them) to active|active (?:it|them))\.?$/i,
+    apActive: /^Choose up to (\d+) (?:of your )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your area)?,?\s*(?:it (?:gets|gains)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line, it (?:gets|gains) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
-    bounceSelfOrOther: /^\[On Play\]\s*Return 1 other character on your area with required energy of (\d+) or less to your hand\. If you cannot, return this (?:character|card) to your hand\.?$/i,
+    bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 (?:of your )?other [Cc]haracters?(?: on your (?:area|field))?,?\s*(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
@@ -263,9 +263,10 @@
   }
 
   // "[On Play] Draw N card(s), place/put/discard M card(s) from your hand to the Outside
-  // Area/Remove Area." — extremely common, but with many small wording variants.
+  // Area/Remove Area." — extremely common, but with many small wording variants. The "[On Play]"
+  // marker is optional so the same matcher covers Event cards with identical bare wording.
   function matchDrawDiscard(fx) {
-    const m = fx.match(/^\[On Play\]\s*Draw (\d+)(?: cards?)?(?:,| and|, then| then)\s*(.*)$/i);
+    const m = fx.match(/^(?:\[On Play\]\s*)?Draw (\d+)(?: cards?)?(?:,| and|, then| then)\s*(.*)$/i);
     if (!m) return null;
     const rest = m[2];
     const dm = rest.match(/(?:place|put|discard)\s+(\d+)\s+cards?/i);
@@ -306,7 +307,7 @@
   const buildCardPredicate = buildLookAtTopPredicate;
 
   function matchLookAtTopFetch(fx) {
-    if (!/^\d*\s*\[On Play\]\s*(?:From among them,?\s*)?Look at the top \d+ cards?/i.test(fx)) return null;
+    if (!/^\d*\s*(?:\[On Play\]\s*)?(?:From among them,?\s*)?Look (?:at )?(?:the )?top \d+ cards?/i.test(fx)) return null;
     const nMatch = fx.match(/top (\d+) cards?/i);
     const n = nMatch ? parseInt(nMatch[1]) : 1;
     let m = fx.match(/(?:Reveal|Add) up to (\d+)\s+(.+?)\s+among them(?:,)?\s*and add (?:it|them|1 card|a card)?\s*to (?:your hand|the hand)/i);
@@ -314,10 +315,14 @@
     if (!m) m = fx.match(/Add up to (\d+)\s+(.+?)\s+among them to (?:the hand|your hand)/i);
     if (!m) m = fx.match(/Reveal up to (\d+)\s+(.+?)\s+and add it to your hand/i);
     if (!m) m = fx.match(/Reveal and [Aa]dd (?:up to )?(\d+) (?:cards? with )?(.+?)(?: among them| to hand|\.)/i);
+    // broader fallbacks: "Reveal/Add/Choose (up to) N ... [among them/those cards] and add ... to hand"
+    // — covers wording that skips "up to" (exact-N pick) or "among them" (no explicit source callout).
+    if (!m) m = fx.match(/(?:Reveal|Add|Choose) up to (\d+)\s+(.+?)\s*(?:among (?:them|those cards))?,?\s*and add (?:it|them|1 card|a card)?\s*to (?:your hand|the hand)/i);
+    if (!m) m = fx.match(/(?:Reveal|Add|Choose) (\d+)\s+(?:cards? with )?(.+?)\s*(?:among (?:them|those cards))?,?\s*and add (?:it|them)?\s*to (?:your hand|the hand)/i);
     if (!m) return null;
     const maxPick = parseInt(m[1]) || 1;
     const predicate = buildLookAtTopPredicate(m[2].replace(/^to\s+/, ''));
-    const hasDiscard = /place 1 card from your hand to/i.test((fx.split(/among them/i).pop() || ''));
+    const hasDiscard = /(?:place|put) 1 card from your hand to|discard 1 card from your hand/i.test(fx);
     return { n, maxPick, predicate, hasDiscard };
   }
 
@@ -362,13 +367,13 @@
   // "[On Play] Look at the top card of your deck ... place (that card/it) ... top of your deck
   // or (to/on) (your/the) Outside Area." — top-or-outside variant.
   function matchScryTopOutside(fx) {
-    if (!/^\[On Play\]\s*Look at the top card of your deck/i.test(fx)) return null;
+    if (!/^(?:\[On Play\]\s*)?Look at the top card of your deck/i.test(fx)) return null;
     if (!/outside area/i.test(fx) || /top or bottom|bottom of/i.test(fx)) return null;
     return true;
   }
   // ... or "top or bottom of your deck" — top-or-bottom variant.
   function matchScryTopBottom(fx) {
-    if (!/^\[On Play\]\s*Look at (?:the top card|1 card from the top) of your deck/i.test(fx)) return null;
+    if (!/^(?:\[On Play\]\s*)?Look at (?:the top card|1 card from the top) of your deck/i.test(fx)) return null;
     if (!/top or bottom|top of[^.]*bottom/i.test(fx)) return null;
     return true;
   }
@@ -376,7 +381,7 @@
   // Outside Area. Place the remaining at/on top of your deck in any order." — mill-style variant
   // (unpicked cards return to the TOP of the deck, unlike the reveal-and-fetch-to-hand pattern).
   function matchScryDiscardTop(fx) {
-    const m = fx.match(/^\[On Play\]\s*Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+) cards?(?: among them)? to the Outside Area\.\s*Place the remaining (?:at|on) (?:the )?top of your deck/i);
+    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+) cards?(?: among them)? to the Outside Area\.\s*Place the remaining (?:at|on) (?:the )?top of your deck/i);
     if (!m) return null;
     return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
   }
@@ -455,7 +460,7 @@
     } else if ((m = fx.match(RX.onplayRestEnemy))) {
       await restEnemyFront(p, m[1] ? parseInt(m[1]) : null);
     } else if ((m = fx.match(RX.bounceSelfOrOther))) {
-      await bounceSelfOrOther(p, unit, parseInt(m[1]));
+      await bounceSelfOrOther(p, unit, parseInt(m[1] || m[2] || m[3]));
     } else if ((rc = matchRetireEnemyConditional(fx))) {
       const limit = rc.name && hasCardNamed(p, rc.name) ? rc.upgradedBP : rc.baseBP;
       await retireEnemyFront(p, limit);
@@ -527,10 +532,21 @@
   };
 
   const origOnEvent = Effects.onEvent.bind(Effects);
+  // tries `matcherFn` against every '@'-separated (normalized) segment of `effect` in turn,
+  // returning the first non-null result — lets Event cards reuse the onPlay-style matchers even
+  // though Events have no "[On Play]" marker to anchor a single findClause() lookup.
+  function findSeg(effect, matcherFn) {
+    for (const seg of (effect || '').split('@').map(s => normalizeFx(s.trim()))) {
+      const r = matcherFn(seg);
+      if (r) return r;
+    }
+    return null;
+  }
+
   Effects.onEvent = async function (G, p, card) {
     if (this.registry[card.no]?.onEvent) return origOnEvent(G, p, card);
     const fx = firstLine(card.effect);
-    let m, rc;
+    let m, rc, dd;
     if ((m = findMatch(card.effect, RX.apActive))) {
       await apUntap(p, parseInt(m[1]));
     } else if ((rc = matchRetireEnemyConditional(fx))) {
@@ -542,6 +558,25 @@
       await restEnemyFront(p);
     } else if ((m = matchBounceEnemy(fx))) {
       await bounceEnemyFront(p, m);
+    } else if ((dd = findSeg(card.effect, matchDrawDiscard))) {
+      draw(p, dd.drawN);
+      log(`${card.name}: จั่ว ${dd.drawN} ใบ`);
+      for (let i = 0; i < dd.discardN; i++) {
+        if (dd.toRemoval) await manualDiscardToRemoval(p); else await discardFromHand(p);
+      }
+    } else if ((dd = findSeg(card.effect, matchLookAtTopFetch))) {
+      log(`${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      const taken = await lookTopAndTake(p, dd.n, dd.predicate, dd.maxPick, `${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      if (taken.length && dd.hasDiscard) await discardFromHand(p);
+    } else if (findSeg(card.effect, matchScryTopOutside)) {
+      log(`${card.name}: ดูการ์ดบนสุดของเด็ค`);
+      await scryTop(p, ['top', 'outside']);
+    } else if (findSeg(card.effect, matchScryTopBottom)) {
+      log(`${card.name}: ดูการ์ดบนสุดของเด็ค`);
+      await scryTop(p, ['top', 'bottom']);
+    } else if ((dd = findSeg(card.effect, matchScryDiscardTop))) {
+      log(`${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      await lookTopAndDiscard(p, dd.n, dd.maxDiscard, `${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
     } else {
       log(`Event ${card.name}: ${fx} (ทำ effect ตามการ์ด — manual)`);
       if (!p.controller.isBot) {
@@ -597,8 +632,9 @@
         rules.push({ when, cond: { name: m[1].trim(), altName: m[2] ? m[2].trim() : null, n: 1, zone: 'field' }, amount: parseInt(m[3]) });
         continue;
       }
-      // "If there is a <NAME> on your area/Front Line, this character gets +N BP."
-      if ((m = rest.match(/^If there is an? <([^>]+)> (?:card )?on your (area|field|Front Line)(?: or [^,]+)?, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      // "If there is a <NAME> on your area/Front Line, this character gets +N BP." (or "If you
+      // have <NAME> on your area, ...")
+      if ((m = rest.match(/^If (?:there is an?|you have) <([^>]+)> (?:card )?on your (area|field|Front Line)(?: or [^,]+)?, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
         const name = m[1].trim();
         if (/^Trait:?/i.test(name)) {
           rules.push({ when, cond: { trait: name.replace(/^Trait:?\s*/i, '').toLowerCase(), n: 1, zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
@@ -718,7 +754,7 @@
       }
 
       // "If there is a <NAME> (on|in) your area/Outside Area, this character gets/gains '...Front Line...'"
-      m = rest.match(/^If there is an? <([^>]+)> (?:on|in) your area, this character (?:gets|gains) /i);
+      m = rest.match(/^If there is (?:an? )?<([^>]+)> (?:on|in) your area, this character (?:gets|gains) /i);
       if (m && new RegExp(grantTail, 'i').test(rest)) {
         const name = m[1].trim();
         return (owner) => [...owner.front, ...owner.energy].some(u => (u.card.name || '').includes(name));

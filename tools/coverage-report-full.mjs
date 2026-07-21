@@ -9,7 +9,7 @@ global.document = { getElementById: () => null, querySelectorAll: () => [], crea
 global.DeckBuilder = { toast: () => {} };
 
 const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
-             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js']
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js']
   .map(p => readFileSync(p, 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;';
 (0, eval)(src);
@@ -43,7 +43,7 @@ function fakePlayer() {
 UAData.byNo.set('DUMMY', { no: 'DUMMY', name: 'Dummy', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000 });
 UAData.byNo.set('DUMMY2', { no: 'DUMMY2', name: 'Dummy Other', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000, effect: '' });
 
-const PASSIVE_TEXT_RE = /if this character is active, increase|generates additional|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card/i;
+const PASSIVE_TEXT_RE = /if this character is active, increase|generates addition\w*|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card/i;
 function hasKeywordOnly(c) {
   const kw = Engine.parseKeywords(c);
   return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||

@@ -39,6 +39,7 @@ const Engine = (() => {
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
     if (/Play this (?:field|site|character|card) (?:to your area )?(?:in active|set to active)/i.test(fx)) kw.entersActive = true;
+    if (/This (?:field|site|character|card) comes (?:in)?to play as [Aa]ctive/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)
     if (/(?:this character|this field|this card) is played in active/i.test(fx)) {
       const nameCond = fx.match(/If there is a character on your area that includes <([^>]+)> in its name, (?:this character|this field) is played in active/i);
@@ -106,6 +107,10 @@ const Engine = (() => {
                                  // whichever ready-up step (this End Phase or owner's next Start Phase) comes first
       noRetire: false,          // "this character will not be retired" (cleared every End Phase)
       tempSnipe: false,         // granted [Sniper] "during this turn" (cleared every End Phase)
+      tempUnblockableBP: null,    // granted "cannot be blocked by characters with BP N or less" this turn
+      tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
+      enteredTurn: G.turn,      // G.turn at the moment this unit entered the field — for "a character
+                                // that came into play this turn" conditions, from ANY source (play/raid/zone)
       attackedThisTurn: 0,
       blockedThisTurn: 0,
       kw: parseKeywords(c),
@@ -179,7 +184,7 @@ const Engine = (() => {
   const RX_SELF_GEN_WHEN_ACTIVE = [
     /If this character is active, increase this character'?s generated energy by (\d+)/i,
     /If this (?:character|card) is active, increase the energy it generates by (\d+)/i,
-    /If this character is active, this character generates additional (\d+)/i,
+    /If this character is active, this character generates addition\w* \+?(\d+)/i,
   ];
   // newer-series wording without a number ("it gains [purple] energy generation") — always +1
   const RX_SELF_GEN_NO_NUM = /If this (?:character|card) is active, it gains \[?\w+\]? energy generation/i;
@@ -249,6 +254,10 @@ const Engine = (() => {
     // loose old-set wording: "If your opponent has [red] or [yellow] Characters/card (on their
     // field), you can reduce this card's/character's energy consumption ... by N"
     m = fx.match(/If your opponent has \[?(\w+)\]?(?: or \[?(\w+)\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?(\d+)/i);
+    if (!m) {
+      // bare variant: "...in their field, this card's energy consumption -N [color] from your hand."
+      m = fx.match(/If your opponent has \[?(\w+)\]?(?: or \[?(\w+)\]?)? (?:card|[Cc]haracters?)[^.]*?this (?:card|character)'?s energy consumption -(\d+)/i);
+    }
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
@@ -276,6 +285,7 @@ const Engine = (() => {
       /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||
+      /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?this (?:card|character)'?s energy consumption -\d+/i.test(fx) ||
       /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx);
   }
   function peekDiscount(p, card) {
@@ -373,6 +383,8 @@ const Engine = (() => {
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
+    p._playedApCostsThisTurn = new Set();
+    p._eventsUsedThisTurn = 0;
     G.retiredThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
@@ -404,11 +416,13 @@ const Engine = (() => {
     update();
   }
 
-  // records the traits of a card played from hand this turn (for "if you used/played a Trait:X
-  // card from your hand during this turn" conditions). Reset each Start Phase.
+  // records the traits (and AP cost) of a card played from hand this turn — for "if you
+  // used/played a Trait:X card from your hand during this turn" and "if you've used a card with
+  // N AP consumption during this turn" conditions. Reset each Start Phase.
   function trackPlayedTraits(p, c) {
     for (const t of (c.traits || '').split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean))
       p._playedTraitsThisTurn.add(t);
+    p._playedApCostsThisTurn.add(c.ap || 0);
   }
   function draw(p, n) {
     for (let i = 0; i < n; i++) {
@@ -605,6 +619,7 @@ const Engine = (() => {
     consumeDiscount(p, c);
     p.hand.splice(hi, 1);
     trackPlayedTraits(p, c);
+    p._eventsUsedThisTurn = (p._eventsUsedThisTurn || 0) + 1;
     log(`${p.name} ใช้ Event: ${c.name}`);
     await Effects.onEvent(G, p, c);
     p.sideline.push(act.no);
@@ -637,7 +652,9 @@ const Engine = (() => {
       let blocker = null;
       if (!targetUnit) {
         const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock &&
-          (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP));
+          (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP) &&
+          (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
+          (atk.tempUnblockableBPMin == null || bp(u) < atk.tempUnblockableBPMin));
         if (candidates.length) {
           const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
           if (b) {
@@ -879,7 +896,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; }
     p.pendingDiscount = null;
     update();
   }
