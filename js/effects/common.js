@@ -224,7 +224,7 @@
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
   // character at the end of your Main Phase." — printed near-identically on ~90 cards across the
   // whole game (a cheap "burn a body for a temporary energy boost" archetype piece).
-  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated energy(?:\s*\[?\w*\]?)? (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
+  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated(?:\s*\[?\w*\]?)? energy(?:\s*\[?\w*\]?)? (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
   // newer-series wording: "This character gains [purple] energy generation and 'At the end of
   // the main phase, retire this character' until the end of the turn." (always +1)
   const RX_SELF_GEN_RETIRE2 = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gains (?:\[?\w+\]?\s*)?energy generation and ["“']*At the end of (?:your|the) [Mm]ain [Pp]hase, retire this character\.?["”']*\s*during this turn\.?$/i;
@@ -722,7 +722,7 @@
         continue;
       }
       // "If there are N or more (other) <Trait:X>/<NAME> cards/characters on/in your area/field/Front Line, ... +N BP"
-      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)> (?:cards?|characters?)(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+(\d+) ?(?:BP)?\.?$/i))) {
+      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)>(?: (?:cards?|characters?))?(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+(\d+) ?(?:BP)?\.?$/i))) {
         const raw = m[3].trim();
         const cond = { n: parseInt(m[1]), other: !!m[2], zone: parseZone(m[4]) };
         if (/^Trait:?/i.test(raw)) cond.trait = raw.replace(/^Trait:?\s*/i, '').toLowerCase();

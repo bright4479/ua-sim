@@ -24,6 +24,8 @@ const Engine = (() => {
       alsoTreatedAs: [],         // "This card is also treated as <NAME>" — for Raid name-matching
       frontGen: false,           // "This character also generates energy on the Front Line." (unconditional)
       untargetable: false,       // "cannot be chosen by your opponent's (character's) effect / Event Card" (approximated as full immunity)
+      cannotBlock: false,        // "This character cannot block." (permanent, unlike the per-turn unit.noBlock field)
+      cannotAttack: false,       // "This character cannot attack." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -51,11 +53,15 @@ const Engine = (() => {
       else kw.entersActive = true;
     }
     // "This character cannot be blocked by characters with BP N or less." (or "N BP or less")
-    const unblock = fx.match(/cannot be blocked by characters with (?:BP ?(\d+)|(\d+) ?BP) or less/i);
+    const unblock = fx.match(/cannot be blocked by characters? with (?:BP ?(\d+)|(\d+) ?BP) or (?:less|lower)/i);
     if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2]);
-    // ... or "BP N or more" — the opposite direction (only weak characters may block).
-    const unblockMin = fx.match(/cannot be blocked by characters with (?:BP ?(\d+)|(\d+) ?BP) or more/i);
+    // ... or "BP N or more/higher" — the opposite direction (only weak characters may block).
+    const unblockMin = fx.match(/cannot be blocked by characters? with (?:BP ?(\d+)|(\d+) ?BP) or (?:more|higher)/i);
     if (unblockMin) kw.unblockableBPMin = parseInt(unblockMin[1] || unblockMin[2]);
+    // "This character cannot block." (permanent, printed as its own bare clause)
+    if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot block\.?\s*$/i.test(seg.trim()))) kw.cannotBlock = true;
+    // "This character cannot attack." (permanent, printed as its own bare clause)
+    if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot attack\.?\s*$/i.test(seg.trim()))) kw.cannotAttack = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -282,6 +288,12 @@ const Engine = (() => {
     const fx = card.effect || '';
     const m = fx.match(/If there is a <([^>]+)> on your area, reduce the AP cost of this card in your hand by (\d+)/i);
     if (m && [...p.front, ...p.energy].some(u => (u.card.name || '').includes(m[1]))) return -parseInt(m[2]);
+    const tm = fx.match(/If there are (\d+) or more <Trait:?\s*([^>]+)> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by (\d+)/i);
+    if (tm) {
+      const need = parseInt(tm[1]), trait = tm[2].trim().toLowerCase();
+      const n = [...p.front, ...p.energy].filter(u => (u.card.traits || '').toLowerCase().includes(trait)).length;
+      if (n >= need) return -parseInt(tm[3]);
+    }
     return 0;
   }
   // does this card's own text carry ANY of the hand-based cost-discount patterns above,
@@ -297,7 +309,8 @@ const Engine = (() => {
       /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?this (?:card|character)'?s energy consumption -\d+/i.test(fx) ||
-      /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx);
+      /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx) ||
+      /If there are \d+ or more <Trait:?\s*[^>]+> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by \d+/i.test(fx);
   }
   function peekDiscount(p, card) {
     if (p.pendingDiscount && p.pendingDiscount.predicate(card))
@@ -655,7 +668,7 @@ const Engine = (() => {
       const decl = await p.controller.chooseAttacker(p, enemy);
       if (!decl) break; // end phase
       const atk = p.front.find(u => u.uid === decl.uid);
-      if (!atk || atk.rested) continue;
+      if (!atk || atk.rested || atk.kw.cannotAttack) continue;
 
       atk.rested = true;
       atk.attackedThisTurn++;
@@ -679,7 +692,7 @@ const Engine = (() => {
       // blocking (not allowed vs snipe-target attacks)
       let blocker = null;
       if (!targetUnit) {
-        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock &&
+        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock && !u.kw.cannotBlock &&
           (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP) &&
           (atk.kw.unblockableBPMin == null || bp(u) < atk.kw.unblockableBPMin) &&
           (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
