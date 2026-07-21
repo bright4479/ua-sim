@@ -41,7 +41,7 @@ const Engine = (() => {
     }
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
-    if (/Play this (?:field|site|character|card) (?:to your area )?(?:in an? active(?: state)?|set to active)/i.test(fx)) kw.entersActive = true;
+    if (/Play this (?:field|site|character|card) (?:to your area )?(?:in an? active(?: state)?|set to active|as active|and set (?:it|this character) to active)/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) comes (?:in)?to play as [Aa]ctive/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) is active when played (?:onto|to|in) (?:the|your) (?:field|area)/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)
@@ -294,6 +294,15 @@ const Engine = (() => {
       const n = [...p.front, ...p.energy].filter(u => (u.card.traits || '').toLowerCase().includes(trait)).length;
       if (n >= need) return -parseInt(tm[3]);
     }
+    // "If there are a total of N or more <NAME> and <Trait:X> cards on your area, reduce the AP
+    // cost of this card in your hand by M." (KMY's Hashira-synergy phrasing, also covers the "of
+    // of" typo some cards carry)
+    const nm = fx.match(/If there (?:are|is) a total of (\d+) or more <([^>]+)> (?:and\/or other|and) <Trait:?\s*([^>]+)>(?: (?:cards?|characters?))? on your area, reduce the AP cost of (?:of )?this card in your hand by (\d+)/i);
+    if (nm) {
+      const need = parseInt(nm[1]), name = nm[2].trim(), trait = nm[3].trim().toLowerCase();
+      const n = [...p.front, ...p.energy].filter(u => (u.card.name || '').includes(name) || (u.card.traits || '').toLowerCase().includes(trait)).length;
+      if (n >= need) return -parseInt(nm[4]);
+    }
     return 0;
   }
   // does this card's own text carry ANY of the hand-based cost-discount patterns above,
@@ -310,7 +319,8 @@ const Engine = (() => {
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?this (?:card|character)'?s energy consumption -\d+/i.test(fx) ||
       /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx) ||
-      /If there are \d+ or more <Trait:?\s*[^>]+> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by \d+/i.test(fx);
+      /If there are \d+ or more <Trait:?\s*[^>]+> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by \d+/i.test(fx) ||
+      /If there (?:are|is) a total of \d+ or more <[^>]+> (?:and\/or other|and) <Trait:?\s*[^>]+>(?: (?:cards?|characters?))? on your area, reduce the AP cost of (?:of )?this card in your hand by \d+/i.test(fx);
   }
   function peekDiscount(p, card) {
     if (p.pendingDiscount && p.pendingDiscount.predicate(card))
@@ -410,7 +420,7 @@ const Engine = (() => {
       for (const a of due) { try { await a.fn(); } catch (e) { console.error(e); } }
     }
     // 1: abilities lasting "until the start of your next turn" expire
-    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; }
+    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u._movedThisTurn = false; }
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
@@ -494,6 +504,7 @@ const Engine = (() => {
       }
       fromLine.splice(idx, 1);
       toLine.push(u);
+      u._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
       log(`${p.name} ย้าย ${u.card.name} ไป ${mv.to === 'front' ? 'Front Line' : 'Energy Line'}`);
     }
     update();
@@ -1020,6 +1031,7 @@ const Engine = (() => {
     }
     from.splice(idx, 1);
     dest.push(unit);
+    unit._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
     log(`${owner.name}: ${unit.card.name} ย้ายไป ${toLine === 'front' ? 'Front' : 'Energy'} Line`);
     return true;
   }

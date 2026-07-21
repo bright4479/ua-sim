@@ -213,12 +213,12 @@
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     apActive: /^Choose up to (\d+) (?:of your )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
-    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your area)?,?\s*(?:it (?:gets|gains)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
+    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your (?:area|field))?,?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line,?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 (?:of your )?other [Cc]haracters?(?: on your (?:area|field))?,?\s*(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:(?:up to )?1 (?:of your )?other|another) [Cc]haracters?(?: in your (?:area|field))?(?: on your (?:area|field))?,?\s*(?:and )?(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
@@ -248,6 +248,7 @@
     t = t.replace(/\buntil the end of the turn\b/gi, 'during this turn');
     t = t.replace(/\bfor the turn\b/gi, 'during this turn');
     t = t.replace(/(\d)BP\b/g, '$1 BP');                      // "+1000BP" / "3000BP or less" -> spaced
+    t = t.replace(/\bBP\+(\d+)/gi, '+$1 BP');                 // "gets BP+1000" -> "gets +1000 BP" (swapped word order)
     t = t.replace(/\b(gains|gets) (\d+) ?BP\b/gi, '$1 +$2 BP');
     t = t.replace(/\bwith (\d+) BP or (less|more)\b/gi, 'with BP $1 or $2');
     t = t.replace(/\bput it to rest\b/gi, 'rest it');
@@ -587,7 +588,7 @@
       return;
     }
     // "[When Attacking] Draw N card(s), place M card(s) from your hand to the Outside Area."
-    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,?\s*(?:then\s*)?(?:place|put) (\d+) cards? from (?:your )?hand/i))) {
+    if ((m = fx.match(/^\[When Attacking\]\s*Draw (\d+) cards?,?\s*(?:and\s*|then\s*)?(?:place|put) (\d+) cards? from (?:your )?hand/i))) {
       draw(p, parseInt(m[1]));
       log(`[When Attacking] ${unit.card.name}: จั่ว ${m[1]} ใบ`);
       const toRemoval = /remove area/i.test(fx);
@@ -678,6 +679,18 @@
 
   function parseZone(zoneWord) { return /front/i.test(zoneWord || '') ? 'front' : 'field'; }
 
+  // "<NAME> and/or other <Trait:X>" combined condition (KMY's Hashira-synergy cards): counts each
+  // matching unit once whether it matches by name or by trait, excluding the evaluated unit itself
+  // from the trait side only (mirrors the printed "and/or OTHER <Trait:X>" wording).
+  function countNameOrTrait(owner, unit, { name, trait, zone }) {
+    const pool = zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
+    return pool.filter(u => {
+      const nameHit = (u.card.name || '').includes(name);
+      const traitHit = trait && u !== unit && (u.card.traits || '').toLowerCase().includes(trait);
+      return nameHit || traitHit;
+    }).length;
+  }
+
   function countMatching(owner, unit, { name, altName, trait, other, zone }) {
     const pool = zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
     return pool.filter(u => {
@@ -736,6 +749,12 @@
         rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
+      // "If there are a total of N or more <NAME> and/or other <Trait:X> cards on your area, this
+      // character gets +N BP." (KMY's Hashira-synergy phrasing)
+      if ((m = rest.match(/^If there (?:are|is) a total of (\d+) or more <([^>]+)> (?:and\/or other|and) <Trait:?\s*([^>]+)>(?: (?:cards?|characters?))? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { nameOrTrait: { name: m[2].trim(), trait: m[3].trim().toLowerCase() }, n: parseInt(m[1]), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
+        continue;
+      }
       // "If you placed a card from your hand (or deck) to the Outside Area during this turn, this character gets +N BP."
       if ((m = rest.match(/^If you placed (?:a|1) cards? from your (?:hand or deck|hand|deck) to the Outside Area during this turn, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { placedOutside: true }, amount: parseInt(m[1]) });
@@ -752,6 +771,7 @@
         if (r.cond) {
           if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
+          else if (r.cond.nameOrTrait) { if (countNameOrTrait(owner, unit, { ...r.cond.nameOrTrait, zone: r.cond.zone }) < r.cond.n) continue; }
           else if (r.cond.differentNames) {
             const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
             const names = new Set(pool.filter(u => (!r.cond.other || u !== unit) &&
