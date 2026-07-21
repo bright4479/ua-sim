@@ -337,7 +337,7 @@ const Engine = (() => {
       newPlayer(nameA, deckA, ctrlA, false),
       newPlayer(nameB, deckB, ctrlB, true),
     ];
-    G.turn = 0; G.active = 0; G.over = false; G.winner = null; G.log = [];
+    G.turn = 0; G.active = 0; G.over = false; G.winner = null; G.log = []; G._delayedActions = [];
 
     for (const p of G.players) {
       p.hand = p.deck.splice(0, 7);
@@ -389,6 +389,13 @@ const Engine = (() => {
   async function startPhase(p) {
     G.phase = 'Start';
     log(`— เทิร์นที่ ${p.turnCount} ของ ${p.name} —`);
+    // per-turn-number delayed effects (e.g. "at the start of your opponent's next turn, ...") —
+    // scheduled via `Engine.scheduleDelayedAction(G.turn + 1, fn)` from wherever the effect fires.
+    if (G._delayedActions && G._delayedActions.length) {
+      const due = G._delayedActions.filter(a => a.turn === G.turn);
+      G._delayedActions = G._delayedActions.filter(a => a.turn !== G.turn);
+      for (const a of due) { try { await a.fn(); } catch (e) { console.error(e); } }
+    }
     // 1: abilities lasting "until the start of your next turn" expire
     for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; }
     p._getPlayedThisTurn = false;
@@ -396,6 +403,7 @@ const Engine = (() => {
     p._playedTraitsThisTurn = new Set();
     p._playedApCostsThisTurn = new Set();
     p._eventsUsedThisTurn = 0;
+    p._placedToOutsideThisTurn = 0;
     G.retiredThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
@@ -1043,11 +1051,14 @@ const Engine = (() => {
     }
   }
 
+  function scheduleDelayedAction(turn, fn) { G._delayedActions.push({ turn, fn }); }
+
   return {
     G, startGame, energyGen, hasEnergyFor, effectiveNeed, effectiveAp, activeAP, bp, parseKeywords,
     raidTargetsFor, opponentOf, findUnit, hasTextCostDiscount,
     // API for the effects layer
     draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
+    scheduleDelayedAction,
   };
 })();
 

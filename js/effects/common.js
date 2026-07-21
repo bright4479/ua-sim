@@ -23,6 +23,7 @@
     if (i == null) return null;
     const no = p.hand.splice(i, 1)[0];
     p.sideline.push(no);
+    p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
     log(`${p.name} ส่ง ${UAData.byNo.get(no)?.name} จากมือไป Outside Area (Sideline)`);
     return no;
   }
@@ -49,7 +50,7 @@
     const body = !p.controller.isBot ? `<div style="text-align:center">${UAData.imgTag(c, 'thumb')}</div>` : '';
     const v = await p.controller.chooseOption(p, `การ์ดบนสุดของเด็ค: ${c?.name}`, opts, body);
     if (v === 'bottom') { p.deck.push(p.deck.shift()); log(`${p.name} ย้ายการ์ดบนเด็คไปใต้เด็ค`); }
-    else if (v === 'outside') { p.sideline.push(p.deck.shift()); log(`${p.name} ส่งการ์ดบนเด็คไป Outside Area (Sideline)`); }
+    else if (v === 'outside') { p.sideline.push(p.deck.shift()); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1; log(`${p.name} ส่งการ์ดบนเด็คไป Outside Area (Sideline)`); }
     else log(`${p.name} เก็บการ์ดไว้บนเด็คเหมือนเดิม`);
   }
 
@@ -77,7 +78,7 @@
     const picked = await p.controller.chooseRevealPick(p, revealed, title || 'ดูการ์ดบนสุดของเด็ค (เลือกส่ง Outside Area ได้)', predicate || null, maxDiscard);
     const sent = [];
     picked.sort((a, b) => b - a).forEach(i => { sent.push(revealed.splice(i, 1)[0]); });
-    for (const no of sent) { p.sideline.push(no); log(`${p.name}: ส่ง ${UAData.byNo.get(no)?.name} ไป Outside Area`); }
+    for (const no of sent) { p.sideline.push(no); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1; log(`${p.name}: ส่ง ${UAData.byNo.get(no)?.name} ไป Outside Area`); }
     p.deck.unshift(...revealed); // remainder back on top, original relative order
     return sent;
   }
@@ -213,7 +214,7 @@
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     apActive: /^Choose up to (\d+) (?:of your )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your area)?,?\s*(?:it (?:gets|gains)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
-    onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line, it (?:gets|gains) -(\d+) ?BP during this turn\.?$/i,
+    onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line,?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
@@ -223,7 +224,7 @@
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
   // character at the end of your Main Phase." — printed near-identically on ~90 cards across the
   // whole game (a cheap "burn a body for a temporary energy boost" archetype piece).
-  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated energy (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
+  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gets \+(\d+)(?:\s*\[?\w*\]?)? generated energy(?:\s*\[?\w*\]?)? (?:and "At the end of your Main Phase, retire this character\."|during this turn|for this turn)/i;
   // newer-series wording: "This character gains [purple] energy generation and 'At the end of
   // the main phase, retire this character' until the end of the turn." (always +1)
   const RX_SELF_GEN_RETIRE2 = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This character gains (?:\[?\w+\]?\s*)?energy generation and ["“']*At the end of (?:your|the) [Mm]ain [Pp]hase, retire this character\.?["”']*\s*during this turn\.?$/i;
@@ -380,6 +381,20 @@
     return { criteria: m[1], amount: parseInt(m[2]) };
   }
 
+  // "[When Attacking] This character gets +N BP (during this turn)." — bare self-buff, no target choice.
+  function matchAttackSelfBuff(fx) {
+    const m = fx.match(/^\[When Attacking\]\s*This character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i);
+    return m ? parseInt(m[1]) : null;
+  }
+  // "Place N cards from the top of your deck to the Outside Area." (unconditional mill, no choice)
+  // — `fx` still carries its "[On Play]"/"[On Retire]" marker prefix (findClause doesn't strip it).
+  function matchPlainMillOutside(fx) {
+    const body = fx.replace(/^\[On (?:Play|Retire)\]\s*/i, '');
+    let m = body.match(/^Place (\d+) cards? from the top of your deck to the Outside Area\.?$/i);
+    if (!m) m = body.match(/^Place the top (\d+) cards? of your deck to the Outside Area\.?$/i);
+    return m ? parseInt(m[1]) : null;
+  }
+
   // "[On Play] Look at the top card of your deck ... place (that card/it) ... top of your deck
   // or (to/on) (your/the) Outside Area." — top-or-outside variant.
   function matchScryTopOutside(fx) {
@@ -397,7 +412,7 @@
   // Outside Area. Place the remaining at/on top of your deck in any order." — mill-style variant
   // (unpicked cards return to the TOP of the deck, unlike the reveal-and-fetch-to-hand pattern).
   function matchScryDiscardTop(fx) {
-    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+) cards?(?: among them)? to the Outside Area\.\s*Place the remaining (?:at|on) (?:the )?top of your deck/i);
+    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+)(?: of them| cards?(?: among them)?) to the Outside Area,?\s*(?:then\s*)?[Pp]lace the remaining(?: cards?)? (?:at|on) (?:the )?top of your deck/i);
     if (!m) return null;
     return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
   }
@@ -546,6 +561,14 @@
       if (Engine.G.retiredThisTurn) await debuffEnemyFront(p, -parseInt(m[1]));
     } else if (/^\[On Play\]/i.test(fx) && (m = matchBounceEnemy(fx))) {
       await bounceEnemyFront(p, m);
+    } else if ((m = matchPlainMillOutside(fx))) {
+      const n = Math.min(m, p.deck.length);
+      if (n) {
+        const sent = p.deck.splice(0, n);
+        p.sideline.push(...sent);
+        p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + sent.length;
+        log(`[On Play] ${unit.card.name}: ส่งการ์ดบนสุดของเด็ค ${n} ใบไป Outside Area`);
+      }
     }
   };
 
@@ -578,6 +601,9 @@
       const uid = await p.controller.chooseOwnCharacter(p, units, `เลือก character รับ +${m.amount} BP เทิร์นนี้`, true);
       const t = units.find(x => x.uid === uid);
       if (t) { t.bpMod += m.amount; log(`[When Attacking] ${unit.card.name}: ${t.card.name} +${m.amount} BP เทิร์นนี้`); await Engine.checkBpZero(); }
+    } else if ((m = matchAttackSelfBuff(fx))) {
+      unit.bpMod += m;
+      log(`[When Attacking] ${unit.card.name}: +${m} BP เทิร์นนี้`);
     }
   };
 
@@ -710,6 +736,11 @@
         rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
+      // "If you placed a card from your hand (or deck) to the Outside Area during this turn, this character gets +N BP."
+      if ((m = rest.match(/^If you placed (?:a|1) cards? from your (?:hand or deck|hand|deck) to the Outside Area during this turn, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { placedOutside: true }, amount: parseInt(m[1]) });
+        continue;
+      }
     }
     if (!rules.length) return null;
     return (owner, unit) => {
@@ -720,6 +751,7 @@
         if (r.when === 'opp' && myTurn) continue;
         if (r.cond) {
           if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
+          else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
           else if (r.cond.differentNames) {
             const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
             const names = new Set(pool.filter(u => (!r.cond.other || u !== unit) &&
@@ -931,6 +963,17 @@
     // "[On Retire] Choose up to 1 other character on your area, it gets +N BP during this turn."
     if ((m = fx.match(/^\[On Retire\]\s*Choose (?:up to )?1 other character on your area,?\s*it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i))) {
       await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
+      return;
+    }
+    // "[On Retire] Place N cards from the top of your deck to the Outside Area." (unconditional mill)
+    if ((m = matchPlainMillOutside(fx))) {
+      const n = Math.min(m, p.deck.length);
+      if (n) {
+        const sent = p.deck.splice(0, n);
+        p.sideline.push(...sent);
+        p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + sent.length;
+        log(`[On Retire] ${unit.card.name}: ส่งการ์ดบนสุดของเด็ค ${n} ใบไป Outside Area`);
+      }
     }
   };
 })();
