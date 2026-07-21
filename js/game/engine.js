@@ -427,6 +427,7 @@ const Engine = (() => {
     p._playedApCostsThisTurn = new Set();
     p._eventsUsedThisTurn = 0;
     p._placedToOutsideThisTurn = 0;
+    p._paidApByEffectThisTurn = 0;
     G.retiredThisTurn = 0;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
@@ -1078,12 +1079,22 @@ const Engine = (() => {
 
   function scheduleDelayedAction(turn, fn) { G._delayedActions.push({ turn, fn }); }
 
+  // for "[Pay N AP]" ability costs specifically (as opposed to a card's normal hand-play AP cost) —
+  // tracks p._paidApByEffectThisTurn for "if you have paid an AP by your character's effect during
+  // this turn, ..." cards. Per-card scripts should call this instead of payAP() directly whenever
+  // the cost being paid is an activated-ability cost, not a play/raid/event cost.
+  function payApForEffect(p, n) {
+    const ok = payAP(p, n);
+    if (ok) p._paidApByEffectThisTurn = (p._paidApByEffectThisTurn || 0) + 1;
+    return ok;
+  }
+
   return {
     G, startGame, energyGen, hasEnergyFor, effectiveNeed, effectiveAp, activeAP, bp, parseKeywords,
     raidTargetsFor, opponentOf, findUnit, hasTextCostDiscount,
     // API for the effects layer
     draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
-    scheduleDelayedAction,
+    scheduleDelayedAction, payApForEffect,
   };
 })();
 

@@ -413,7 +413,7 @@
   // Outside Area. Place the remaining at/on top of your deck in any order." — mill-style variant
   // (unpicked cards return to the TOP of the deck, unlike the reveal-and-fetch-to-hand pattern).
   function matchScryDiscardTop(fx) {
-    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+)(?: of them| cards?(?: among them)?) to the Outside Area,?\s*(?:then\s*)?[Pp]lace the remaining(?: cards?)? (?:at|on) (?:the )?top of your deck/i);
+    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck[.,]\s*[Pp]lace up to (\d+)(?: of them| cards?(?: among them)?) to the Outside Area[.,]?\s*(?:then\s*)?[Pp]lace the remaining(?: cards?)? (?:at|on) (?:the )?top of your deck/i);
     if (!m) return null;
     return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
   }
@@ -760,6 +760,11 @@
         rules.push({ when, cond: { placedOutside: true }, amount: parseInt(m[1]) });
         continue;
       }
+      // "If your opponent's Life is N or less, this character gets/gains +M BP."
+      if ((m = rest.match(/^If your opponent'?s Life is (\d+) or less, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { oppLifeMax: parseInt(m[1]) }, amount: parseInt(m[2]) });
+        continue;
+      }
     }
     if (!rules.length) return null;
     return (owner, unit) => {
@@ -772,6 +777,7 @@
           if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
           else if (r.cond.nameOrTrait) { if (countNameOrTrait(owner, unit, { ...r.cond.nameOrTrait, zone: r.cond.zone }) < r.cond.n) continue; }
+          else if (r.cond.oppLifeMax != null) { if ((Engine.opponentOf(owner).life || []).length > r.cond.oppLifeMax) continue; }
           else if (r.cond.differentNames) {
             const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
             const names = new Set(pool.filter(u => (!r.cond.other || u !== unit) &&
