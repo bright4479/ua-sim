@@ -9,7 +9,7 @@ global.document = { getElementById: () => null, querySelectorAll: () => [], crea
 global.DeckBuilder = { toast: () => {} };
 
 const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
-             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js']
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js', 'js/effects/jjk.js']
   .map(p => readFileSync(p, 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;';
 (0, eval)(src);
@@ -22,7 +22,7 @@ function fakeUnit(no) {
 function fakePlayer() {
   return {
     name: 'x', hand: ['DUMMY'], deck: ['DUMMY', 'DUMMY', 'DUMMY', 'DUMMY', 'DUMMY', 'DUMMY'],
-    sideline: [], removal: [], front: [fakeUnit('DUMMY2')], energy: [fakeUnit('DUMMY2')], apTotal: 3, apRested: 1,
+    sideline: [], removal: [], front: [fakeUnit('DUMMY2'), fakeUnit('DUMMY3')], energy: [fakeUnit('DUMMY2')], apTotal: 3, apRested: 1,
     controller: {
       isBot: true,
       async chooseOption(p, t, opts) { return opts[0]?.value; },
@@ -42,6 +42,7 @@ function fakePlayer() {
 }
 UAData.byNo.set('DUMMY', { no: 'DUMMY', name: 'Dummy', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000 });
 UAData.byNo.set('DUMMY2', { no: 'DUMMY2', name: 'Dummy Other', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 1000, effect: '' });
+UAData.byNo.set('DUMMY3', { no: 'DUMMY3', name: 'Dummy High-BP', type: 'Character', color: 'Red', need: 0, ap: 0, bp: 5000, effect: '' });
 
 const PASSIVE_TEXT_RE = /if this character is active, increase|generates \d* ?addition\w*|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card|if this (?:character|card) is active,? it gains \[?\w*\]? energy generation/i;
 function hasKeywordOnly(c) {

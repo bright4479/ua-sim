@@ -39,7 +39,7 @@ const Engine = (() => {
     }
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
-    if (/Play this (?:field|site|character|card) (?:to your area )?(?:in active|set to active)/i.test(fx)) kw.entersActive = true;
+    if (/Play this (?:field|site|character|card) (?:to your area )?(?:in an? active(?: state)?|set to active)/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) comes (?:in)?to play as [Aa]ctive/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) is active when played (?:onto|to|in) (?:the|your) (?:field|area)/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)

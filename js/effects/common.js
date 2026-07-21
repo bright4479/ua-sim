@@ -107,6 +107,22 @@
     return u;
   }
 
+  // debuff targeting ANY opponent character (front OR energy line), gated by a BP floor or ceiling
+  // — several cards say "on your opponent's area" (both lines) rather than "Front Line".
+  async function debuffEnemyAny(p, delta, { min, max } = {}) {
+    const enemy = Engine.opponentOf(p);
+    const units = [...enemy.front, ...enemy.energy].filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable &&
+      (min == null || Engine.bp(u) >= min) && (max == null || Engine.bp(u) <= max));
+    if (!units.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู รับ ${delta} BP`, true);
+    const u = units.find(x => x.uid === uid);
+    if (!u) return null;
+    u.bpMod += delta;
+    log(`${p.name}: ${u.card.name} ${delta} BP`);
+    await Engine.checkBpZero();
+    return u;
+  }
+
   async function restEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
     const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable && !u.tempUntargetable &&
@@ -183,7 +199,7 @@
 
   window.UAEffectHelpers = {
     discardFromHand, manualDiscardToRemoval, scryTop, lookTopAndTake, lookTopAndDiscard, buffOwnCharacter,
-    debuffEnemyFront, restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther,
+    debuffEnemyFront, debuffEnemyAny, restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther,
     fetchFromSideline, addLifeToHand, countNoTrigger, hasCardNamed, hasCardOfColor,
   };
 
@@ -307,7 +323,7 @@
   const buildCardPredicate = buildLookAtTopPredicate;
 
   function matchLookAtTopFetch(fx) {
-    if (!/^\d*\s*(?:\[On Play\]\s*)?(?:From among them,?\s*)?Look (?:at )?(?:the )?top \d+ cards?/i.test(fx)) return null;
+    if (!/^\d*\s*(?:\[On Play\]\s*)?(?:From among them,?\s*)?Look (?:at )?(?:the )?top \d+(?: cards?)?/i.test(fx)) return null;
     const nMatch = fx.match(/top (\d+) cards?/i);
     const n = nMatch ? parseInt(nMatch[1]) : 1;
     let m = fx.match(/(?:Reveal|Add) up to (\d+)\s+(.+?)\s+among them(?:,)?\s*and add (?:it|them|1 card|a card)?\s*to (?:your hand|the hand)/i);
@@ -403,6 +419,14 @@
     const m = fx.match(/^Choose (?:up to )?1 character on your opponent'?s Front Line,\s*it (?:gets|gains) [\["]?-(\d+) ?BP[\]"]? during this turn\.?$/i);
     return m ? parseInt(m[1]) : null;
   }
+  // "Choose up to 1 character on your opponent's area with BP N or higher/less, it gets -M BP
+  // during this turn." — targets BOTH lines (not just Front Line).
+  function matchDebuffEnemyAny(fx) {
+    const m = fx.match(/Choose (?:up to )?1 character on your opponent'?s area with BP (\d+) or (higher|more|less)\s*,?\s*it (?:gets|gains) -(\d+) ?BP during this turn\.?/i);
+    if (!m) return null;
+    const threshold = parseInt(m[1]), delta = -parseInt(m[3]);
+    return /higher|more/i.test(m[2]) ? { min: threshold, delta } : { max: threshold, delta };
+  }
   function matchBareRestEnemy(fx) {
     return /^Choose (?:up to )?1 character on your opponent'?s Front Line and rest it\.?$/i.test(fx);
   }
@@ -480,6 +504,8 @@
       await buffOwnCharacter(p, parseInt(m[2]), { excludeUnit: m[1] ? unit : null });
     } else if ((m = fx.match(RX.onplayDebuffEnemy))) {
       await debuffEnemyFront(p, -parseInt(m[1]));
+    } else if ((dd = matchDebuffEnemyAny(fx))) {
+      await debuffEnemyAny(p, dd.delta, dd);
     } else if ((m = fx.match(RX.onplayRestEnemy))) {
       await restEnemyFront(p, m[1] ? parseInt(m[1]) : null);
     } else if ((m = fx.match(RX.bounceSelfOrOther))) {
@@ -578,6 +604,8 @@
       await retireEnemyFront(p, limit);
     } else if ((m = matchBareDebuffEnemy(fx))) {
       await debuffEnemyFront(p, -m);
+    } else if ((dd = matchDebuffEnemyAny(fx))) {
+      await debuffEnemyAny(p, dd.delta, dd);
     } else if (matchBareRestEnemy(fx)) {
       await restEnemyFront(p);
     } else if ((m = matchBounceEnemy(fx))) {

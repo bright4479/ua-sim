@@ -13,7 +13,7 @@ global.DeckBuilder = { toast: () => {} };
 
 // concatenate so top-level consts share one eval scope, then export to global
 const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
-             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js']
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js', 'js/effects/jjk.js']
   .map(p => readFileSync(join(ROOT, p), 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;' +
   'globalThis.makeBotController = makeBotController; globalThis.buildBotDeck = buildBotDeck;';
