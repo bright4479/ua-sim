@@ -102,6 +102,10 @@ const Engine = (() => {
       retireAtEndOfMain: false, // scheduled self-retire at the end of this Main Phase
       retireAtEndOfTurn: false, // scheduled self-retire at the beginning of this End Phase
       noBlock: false,           // "cannot block during this turn" (cleared every End Phase)
+      skipNextStand: false,     // "the next time it would set to active, it doesn't" — consumed by
+                                 // whichever ready-up step (this End Phase or owner's next Start Phase) comes first
+      noRetire: false,          // "this character will not be retired" (cleared every End Phase)
+      tempSnipe: false,         // granted [Sniper] "during this turn" (cleared every End Phase)
       attackedThisTurn: 0,
       blockedThisTurn: 0,
       kw: parseKeywords(c),
@@ -114,7 +118,15 @@ const Engine = (() => {
     // per-card script wins; otherwise the generic text-pattern evaluator (set up by common.js)
     const bonus = hook ? (hook(owner, unit) || 0)
       : (Effects.genericBpBonus ? (Effects.genericBpBonus(owner, unit) || 0) : 0);
-    return Math.max(0, (unit.card.bp || 0) + unit.bpMod + unit.bpPersist + bonus);
+    // aura bonuses granted by units on the same player's field ("All your <X> characters get
+    // +N BP") — auraBp(owner, sourceUnit, targetUnit) on the SOURCE card's registry entry.
+    // Implementations must not call Engine.bp() (recursion).
+    let aura = 0;
+    for (const u2 of [...owner.front, ...owner.energy]) {
+      const ah = Effects.registry[u2.no]?.auraBp;
+      if (ah) aura += ah(owner, u2, unit) || 0;
+    }
+    return Math.max(0, (unit.card.bp || 0) + unit.bpMod + unit.bpPersist + bonus + aura);
   }
 
   function findOwnerIdx(unit) {
@@ -184,7 +196,7 @@ const Engine = (() => {
   function addUnitGen(gen, p, u) {
     const col = u.card.color || 'None';
     const hook = Effects.registry[u.no]?.genMod;
-    const modBonus = hook ? (hook(u) || 0)
+    const modBonus = hook ? (hook(u, p) || 0)
       : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
     const bonus = selfGenBonus(u) + (u.tempGen || 0) + modBonus;
     gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
@@ -365,8 +377,11 @@ const Engine = (() => {
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
-    // 2: ready everything
-    for (const u of [...p.front, ...p.energy]) { u.rested = false; u.attackedThisTurn = 0; u.blockedThisTurn = 0; }
+    // 2: ready everything (unless "the next time it would set to active, it doesn't" is pending)
+    for (const u of [...p.front, ...p.energy]) {
+      if (u.skipNextStand) u.skipNextStand = false; else u.rested = false;
+      u.attackedThisTurn = 0; u.blockedThisTurn = 0;
+    }
     p.apRested = 0;
     // 3: AP count
     p.apTotal = apForTurn(p);
@@ -612,7 +627,7 @@ const Engine = (() => {
       atk.attackedThisTurn++;
 
       let targetUnit = null;
-      if (decl.targetUid != null && atk.kw.snipe) {
+      if (decl.targetUid != null && (atk.kw.snipe || atk.tempSnipe)) {
         targetUnit = enemy.front.find(u => u.uid === decl.targetUid) || null;
       }
       log(`${p.name}: ${atk.card.name} โจมตี ${targetUnit ? targetUnit.card.name : enemy.name}`);
@@ -679,8 +694,10 @@ const Engine = (() => {
           }
         }
       } else {
-        // direct damage
-        const dmg = atk.tempDmg || atk.kw.dmg || 1;
+        // direct damage — [Damage +N] (additive, from a granted/conditional effect) stacks on
+        // top of the printed [Damage(N)]/default-1 base, unlike tempDmg which overrides it outright.
+        const dmgBonusHook = Effects.registry[atk.no]?.dmgBonus?.(p, atk) || 0;
+        const dmg = (atk.tempDmg || atk.kw.dmg || 1) + dmgBonusHook;
         await dealDamage(p, enemy, dmg, atk);
         if (G.over) return;
       }
@@ -851,8 +868,8 @@ const Engine = (() => {
         await sidelineUnit(p, u, 'effect');
       }
     }
-    // ready characters/sites (AP stays)
-    for (const u of [...p.front, ...p.energy]) u.rested = false;
+    // ready characters/sites (AP stays), unless "the next time it would set to active, it doesn't" is pending
+    for (const u of [...p.front, ...p.energy]) { if (u.skipNextStand) u.skipNextStand = false; else u.rested = false; }
     // hand limit 8 -> removal
     while (p.hand.length > 8) {
       const idx = await p.controller.chooseDiscard(p);
@@ -862,7 +879,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; }
     p.pendingDiscount = null;
     update();
   }
@@ -882,6 +899,7 @@ const Engine = (() => {
   // finds & removes `unit` from owner's front/energy line, sends it to Sideline.
   // reason: 'battle' | 'effect' | 'bp0'
   async function sidelineUnit(owner, unit, reason = 'effect') {
+    if (unit.noRetire) { log(`${unit.card.name}: ไม่ถูก retire (ผล "will not be retired")`); return; }
     G.retiredThisTurn = (G.retiredThisTurn || 0) + 1; // tracked for "if a character was retired this turn" cards
     for (const line of [owner.front, owner.energy]) {
       const i = line.indexOf(unit);
@@ -960,6 +978,7 @@ const Engine = (() => {
     if (payApCost && !payAP(owner, c.ap || 0)) return null;
     owner[zone].splice(idx, 1);
     const u = makeUnit(no);
+    u._playedByEffect = true; // for "[On Play] If this character was played by your effect, ..." cards
     u.rested = !active;
     dest.push(u);
     const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : 'Removal';
@@ -1001,8 +1020,12 @@ const Engine = (() => {
 //   onRaided(G,p,targetNo,raiderUnit) — fires on the covered card's own script when raided on
 //   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
+//   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
+//                                     same field ("All your <X> get +N BP"); must not call Engine.bp()
 //   impactBonus(p,unit) -> number   — dynamic passive Impact addition, added when a battle is won
+//   dmgBonus(p,unit) -> number      — dynamic passive [Damage +N] addition, added on unblocked (direct-damage) attacks
 //   genMod(unit) -> number          — dynamic passive energy-generation addition (energy line only)
+//   frontGenBonus(p,unit) -> boolean — dynamic "also generates energy on the Front Line" grant
 //   costMod(p,card) -> {needDelta,apDelta} — dynamic passive cost modifier while the card is in hand
 const Effects = {
   registry: {},

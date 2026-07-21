@@ -67,6 +67,21 @@
     return taken;
   }
 
+  // "Look at the top N cards of your deck. Place up to M card(s) among them to the Outside Area.
+  // Place the remaining at/on top of your deck in any order." — a mill-style variant of the above
+  // where the *unpicked* cards go back to the TOP of the deck instead of the bottom.
+  async function lookTopAndDiscard(p, n, maxDiscard, title) {
+    n = Math.min(n, p.deck.length);
+    if (!n) return [];
+    const revealed = p.deck.splice(0, n);
+    const picked = await p.controller.chooseRevealPick(p, revealed, title || 'ดูการ์ดบนสุดของเด็ค (เลือกส่ง Outside Area ได้)', null, maxDiscard);
+    const sent = [];
+    picked.sort((a, b) => b - a).forEach(i => { sent.push(revealed.splice(i, 1)[0]); });
+    for (const no of sent) { p.sideline.push(no); log(`${p.name}: ส่ง ${UAData.byNo.get(no)?.name} ไป Outside Area`); }
+    p.deck.unshift(...revealed); // remainder back on top, original relative order
+    return sent;
+  }
+
   async function buffOwnCharacter(p, delta, { excludeUnit, persist } = {}) {
     const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character' && u !== excludeUnit);
     if (!units.length) return null;
@@ -167,7 +182,7 @@
   }
 
   window.UAEffectHelpers = {
-    discardFromHand, manualDiscardToRemoval, scryTop, lookTopAndTake, buffOwnCharacter,
+    discardFromHand, manualDiscardToRemoval, scryTop, lookTopAndTake, lookTopAndDiscard, buffOwnCharacter,
     debuffEnemyFront, restEnemyFront, retireEnemyFront, apUntap, bounceSelfOrOther,
     fetchFromSideline, addLifeToHand, countNoTrigger, hasCardNamed, hasCardOfColor,
   };
@@ -204,6 +219,13 @@
   const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, twenty: 20 };
   function normalizeFx(s) {
     let t = s;
+    // strip the leading numeric artifact many cards carry (the printed gen value leaking into the
+    // text: "2 [Your Turn] ...", "-0[On Play] ...", "7For each ...") — only when what follows looks
+    // like the actual clause start (bracket tag / capital / <name> / bullet), so genuine leading
+    // numbers in prose ("1 of your other...") are left alone.
+    t = t.replace(/^\s*-?\d+\s*(?=\[|[A-Z<•])/, '');
+    t = t.replace(/\binto (?:your|the) hand\b/gi, 'to your hand');
+    t = t.replace(/\bLook at (?:your )?top (\d+)/gi, 'Look at the top $1');
     t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
     t = t.replace(/\ba card\b/gi, '1 card');
     t = t.replace(/\buntil the end of the turn\b/gi, 'during this turn');
@@ -350,6 +372,14 @@
     if (!/top or bottom|top of[^.]*bottom/i.test(fx)) return null;
     return true;
   }
+  // "[On Play] Look at the top N cards of your deck. Place up to M card(s) among them to the
+  // Outside Area. Place the remaining at/on top of your deck in any order." — mill-style variant
+  // (unpicked cards return to the TOP of the deck, unlike the reveal-and-fetch-to-hand pattern).
+  function matchScryDiscardTop(fx) {
+    const m = fx.match(/^\[On Play\]\s*Look at the top (\d+) cards? of your deck\.\s*Place up to (\d+) cards?(?: among them)? to the Outside Area\.\s*Place the remaining (?:at|on) (?:the )?top of your deck/i);
+    if (!m) return null;
+    return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
+  }
 
   // "Choose 1 character on your opponent's Front Line with BP N or less and retire it. If there
   // is a <NAME> on your area, it's BP M or less instead." — common Event/On-Play text with an
@@ -415,6 +445,9 @@
     } else if (matchScryTopBottom(fx)) {
       log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุดของเด็ค`);
       await scryTop(p, ['top', 'bottom']);
+    } else if ((dd = matchScryDiscardTop(fx))) {
+      log(`[On Play] ${unit.card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+      await lookTopAndDiscard(p, dd.n, dd.maxDiscard, `${unit.card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
     } else if ((m = fx.match(RX.onplayBuffOther))) {
       await buffOwnCharacter(p, parseInt(m[2]), { excludeUnit: m[1] ? unit : null });
     } else if ((m = fx.match(RX.onplayDebuffEnemy))) {
@@ -804,6 +837,11 @@
     // "[On Retire] Choose 1 character on your opponent's Front Line and rest it."
     if (/^\[On Retire\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line and rest it\.?$/i.test(fx)) {
       await restEnemyFront(p);
+      return;
+    }
+    // "[On Retire] Choose up to 1 other character on your area, it gets +N BP during this turn."
+    if ((m = fx.match(/^\[On Retire\]\s*Choose (?:up to )?1 other character on your area,?\s*it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i))) {
+      await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
     }
   };
 })();
