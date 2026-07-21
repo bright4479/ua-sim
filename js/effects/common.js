@@ -70,11 +70,11 @@
   // "Look at the top N cards of your deck. Place up to M card(s) among them to the Outside Area.
   // Place the remaining at/on top of your deck in any order." — a mill-style variant of the above
   // where the *unpicked* cards go back to the TOP of the deck instead of the bottom.
-  async function lookTopAndDiscard(p, n, maxDiscard, title) {
+  async function lookTopAndDiscard(p, n, maxDiscard, title, predicate) {
     n = Math.min(n, p.deck.length);
     if (!n) return [];
     const revealed = p.deck.splice(0, n);
-    const picked = await p.controller.chooseRevealPick(p, revealed, title || 'ดูการ์ดบนสุดของเด็ค (เลือกส่ง Outside Area ได้)', null, maxDiscard);
+    const picked = await p.controller.chooseRevealPick(p, revealed, title || 'ดูการ์ดบนสุดของเด็ค (เลือกส่ง Outside Area ได้)', predicate || null, maxDiscard);
     const sent = [];
     picked.sort((a, b) => b - a).forEach(i => { sent.push(revealed.splice(i, 1)[0]); });
     for (const no of sent) { p.sideline.push(no); log(`${p.name}: ส่ง ${UAData.byNo.get(no)?.name} ไป Outside Area`); }
@@ -96,7 +96,7 @@
 
   async function debuffEnemyFront(p, delta, { persist } = {}) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable);
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable);
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู รับ ${delta} BP`, true);
     const u = units.find(x => x.uid === uid);
@@ -109,7 +109,7 @@
 
   async function restEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable &&
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable && !u.tempUntargetable &&
       (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, 'เลือก character ศัตรูให้วางนอน', true);
@@ -120,7 +120,7 @@
 
   async function retireEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู (BP ${bpLimit ?? '-'} หรือน้อยกว่า) ให้ retire`, true);
     const u = units.find(x => x.uid === uid);
@@ -390,11 +390,11 @@
   // is a <NAME> on your area, it's BP M or less instead." — common Event/On-Play text with an
   // optional name-gated BP-threshold upgrade.
   function matchRetireEnemyConditional(fx) {
-    let m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with [\["]?BP (\d+) or less[\]"]? and retire it\.?(?:\s*If there is an? <([^>]+)> on your area, it'?s [\["]?BP (\d+) or less[\]"]? instead\.?)?/i);
+    let m = fx.match(/Choose (?:up to )?1 character on your opponent'?s Front Line with [\["]?BP (\d+) or less[\]"]? and (?:retire it|sideline it|Outside Area it)\.?(?:\s*If there is an? <([^>]+)> on your area, it'?s [\["]?BP (\d+) or less[\]"]? instead\.?)?/i);
     if (m) return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
     // newer-series word order: "Choose 1 character with 3000 or less BP on your opponent's
-    // front line and retire it. If <NAME> is on your area, 5000 or less BP instead."
-    m = fx.match(/Choose (?:up to )?1 character with (\d+) or less BP on your opponent'?s Front Line and retire it\.?(?:\s*If <([^>]+)> is on your area, (\d+) or less BP instead\.?)?/i);
+    // front line and retire/sideline/Outside-Area it. If <NAME> is on your area, 5000 or less BP instead."
+    m = fx.match(/Choose (?:up to )?1 character with (\d+) or less BP on your opponent'?s Front Line and (?:retire it|sideline it|Outside Area it)\.?(?:\s*If <([^>]+)> is on your area, (\d+) or less BP instead\.?)?/i);
     if (m) return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
     return null;
   }
@@ -414,7 +414,7 @@
   }
   async function bounceEnemyFront(p, bpLimit) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
+    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable && (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, `เลือก character ศัตรู (BP ${bpLimit ?? '-'} หรือน้อยกว่า) กลับมือ`, true);
     const u = units.find(x => x.uid === uid);

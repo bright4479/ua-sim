@@ -110,6 +110,8 @@ const Engine = (() => {
       noBlock: false,           // "cannot block during this turn" (cleared every End Phase)
       effectsNullified: false, // "loses all of its (original) effects during this turn" — suppresses
                                 // registry/generic onPlay/onAttack/onMain and bp/gen bonuses for this unit
+      tempUntargetable: false, // granted "cannot be chosen by opponent's effects" this turn (temp
+                                // counterpart to the static kw.untargetable keyword)
       skipNextStand: false,     // "the next time it would set to active, it doesn't" — consumed by
                                  // whichever ready-up step (this End Phase or owner's next Start Phase) comes first
       noRetire: false,          // "this character will not be retired" (cleared every End Phase)
@@ -656,6 +658,15 @@ const Engine = (() => {
       }
       log(`${p.name}: ${atk.card.name} โจมตี ${targetUnit ? targetUnit.card.name : enemy.name}`);
       await Effects.onAttack(G, p, atk);
+      // temporary "[When Attacking] draw up to 1 card" grant (from another card's effect)
+      if (atk._grantedAttackDraw && p.deck.length) { draw(p, 1); log(`${atk.card.name}: จั่ว 1 ใบ (ได้รับความสามารถชั่วคราว)`); }
+      // Field/other-unit passive watchers: "When one of your <Trait:X> characters attacks, ..." —
+      // not keyed to the attacker's own card no (fires for every OTHER unit p controls too).
+      for (const u of [...p.front, ...p.energy]) {
+        if (u === atk) continue;
+        const h = Effects.registry[u.no]?.onAnyAttack;
+        if (h) await h(G, p, atk, u);
+      }
 
       // blocking (not allowed vs snipe-target attacks)
       let blocker = null;
@@ -912,7 +923,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; }
     p.pendingDiscount = null;
     update();
   }
@@ -1054,6 +1065,9 @@ const Engine = (() => {
 //   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
 //   onDefenderWinBattle(G,p,unit,atkP,atkUnit) — fires on a successful BLOCKER's own card (the
 //     attacker's BP was not enough), e.g. "[Opponent's Turn] When this character wins a battle, ..."
+//   onAnyAttack(G,p,atkUnit,selfUnit) — fires on EVERY other unit p controls whenever ANY of them
+//     declares an attack, e.g. "When one of your <Trait:X> characters attacks, you may rest this
+//     character to ..." (selfUnit is NOT the attacker; atkUnit !== selfUnit is guaranteed)
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
 //   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
 //                                     same field ("All your <X> get +N BP"); must not call Engine.bp()
