@@ -818,6 +818,13 @@ const Engine = (() => {
         const dmg = (atk.tempDmg || atk.kw.dmg || 1) + dmgBonusHook;
         await dealDamage(p, enemy, dmg, atk);
         if (G.over) return;
+        // Field/other-unit passive watchers: "When your <NAME>'s attack is not blocked, ..." —
+        // only fires on a genuinely unblocked attack (no blocker AND no snipe target), unlike
+        // onAnyWinBattle/onAnyLoseBattle which require SOME defender to have been determined.
+        for (const u of [...p.front, ...p.energy]) {
+          const h = Effects.registry[u.no]?.onAnyUnblockedAttack;
+          if (h) await h(G, p, atk, u);
+        }
       }
 
       if (atk.kw.doubleAttack && atk.attackedThisTurn === 1) {
@@ -1160,6 +1167,13 @@ const Engine = (() => {
 //   onAnyAttack(G,p,atkUnit,selfUnit) — fires on EVERY other unit p controls whenever ANY of them
 //     declares an attack, e.g. "When one of your <Trait:X> characters attacks, you may rest this
 //     character to ..." (selfUnit is NOT the attacker; atkUnit !== selfUnit is guaranteed)
+//   onAnyPlay(G,p,playedUnit,selfUnit) — fires on EVERY other unit p controls whenever ANY of them
+//     (including itself entering via Raid) is played, e.g. "When a <NAME> is played on a different
+//     line than this character, you may move this character to another line" (wired once, centrally,
+//     inside common.js's Effects.onPlay wrapper — not per call site)
+//   onAnyUnblockedAttack(G,p,atkUnit,selfUnit) — fires on EVERY unit p controls (including the
+//     attacker) whenever ANY of them attacks and is genuinely unblocked (no blocker, no snipe
+//     target) — the "unblocked attack" detection gap noted in several earlier rounds, now available
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
 //   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
 //                                     same field ("All your <X> get +N BP"); must not call Engine.bp()

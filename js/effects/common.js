@@ -492,9 +492,9 @@
   Object.assign(window.UAEffectHelpers, { bounceEnemyFront, unraidTopLayer });
 
   const origOnPlay = Effects.onPlay.bind(Effects);
-  Effects.onPlay = async function (G, p, unit) {
+  async function dispatchOnPlay(G, p, unit) {
     if (unit.card.trigger === 'Get') p._getPlayedThisTurn = true; // tracked for "if a [Get] character was played this turn" cards
-    if (this.registry[unit.no]?.onPlay) return origOnPlay(G, p, unit);
+    if (Effects.registry[unit.no]?.onPlay) return origOnPlay(G, p, unit);
     const fx = findClause(unit.card.effect, /^\[On Play\]/i);
     if (!fx) return;
     let m, dd, rc;
@@ -575,6 +575,18 @@
         p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + sent.length;
         log(`[On Play] ${unit.card.name}: ส่งการ์ดบนสุดของเด็ค ${n} ใบไป Outside Area`);
       }
+    }
+  }
+
+  // wraps dispatchOnPlay so the "when a card is played" broadcast (onAnyPlay) always fires exactly
+  // once per play regardless of which of onPlay's 4 call sites triggered it (playCard/raidCard/
+  // raidFromTrigger/playCardFromZone), and regardless of whether a per-card registry.onPlay exists.
+  Effects.onPlay = async function (G, p, unit) {
+    await dispatchOnPlay(G, p, unit);
+    for (const u of [...p.front, ...p.energy]) {
+      if (u === unit) continue;
+      const h = Effects.registry[u.no]?.onAnyPlay;
+      if (h) await h(G, p, unit, u);
     }
   };
 
