@@ -455,6 +455,7 @@ const Engine = (() => {
     G._triggerActivatedThisTurn = false;
     p._dealtDamageThisTurn = false;
     p._revealedNonYellowRaidThisTurn = false;
+    p._grantedRaidDraw = false;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
@@ -682,6 +683,8 @@ const Engine = (() => {
     }
     await Effects.onRaided(G, p, target.no, raider);
     await Effects.onPlay(G, p, raider);
+    // temporary "when your character raids, draw 1 card" grant (from an Event card this turn)
+    if (p._grantedRaidDraw) { draw(p, 1); log(`${p.name}: จั่ว 1 ใบ (ได้รับความสามารถชั่วคราวจาก raid)`); }
     update();
   }
 
@@ -715,6 +718,9 @@ const Engine = (() => {
       if (!decl) break; // end phase
       const atk = p.front.find(u => u.uid === decl.uid);
       if (!atk || atk.rested || atk.kw.cannotAttack) continue;
+      // per-card conditional attack restriction ("this character can only attack if ...") —
+      // registry-defined and evaluated live, unlike the permanent kw.cannotAttack flag.
+      if (Effects.registry[atk.no]?.canAttack && !Effects.registry[atk.no].canAttack(p, atk)) continue;
 
       atk.rested = true;
       atk.attackedThisTurn++;
@@ -1162,6 +1168,9 @@ const Engine = (() => {
 //   genMod(unit) -> number          — dynamic passive energy-generation addition (energy line only)
 //   frontGenBonus(p,unit) -> boolean — dynamic "also generates energy on the Front Line" grant
 //   costMod(p,card) -> {needDelta,apDelta} — dynamic passive cost modifier while the card is in hand
+//   canAttack(p,unit) -> boolean    — dynamic conditional attack eligibility (checked in attackPhase AND
+//                                     bot.js's chooseAttacker candidate filter — both must agree, or the
+//                                     bot can loop forever re-declaring an attacker attackPhase rejects)
 const Effects = {
   registry: {},
   async onPlay(G, p, unit) {

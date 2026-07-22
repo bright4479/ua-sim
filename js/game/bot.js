@@ -95,7 +95,8 @@ function makeBotController() {
 
     async chooseAttacker(p, enemy) {
       await delay(400);
-      const ready = p.front.filter(u => !u.rested && u.card.type === 'Character' && !u.kw.cannotAttack);
+      const ready = p.front.filter(u => !u.rested && u.card.type === 'Character' && !u.kw.cannotAttack &&
+        !(Effects.registry[u.no]?.canAttack && !Effects.registry[u.no].canAttack(p, u)));
       if (!ready.length) return null;
       // attack with strongest first
       ready.sort((a, b) => Engine.bp(b) - Engine.bp(a));

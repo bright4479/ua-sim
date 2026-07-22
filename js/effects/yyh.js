@@ -21,12 +21,13 @@
   }
 
   // UAPR-YYH-P-001 Toguro (Younger Brother) — [Main][Frontline][1/turn] retire 1 other own
-  // character; if did, draw 1 and self gains front-line energy generation this turn. (Skipped: the
-  // "can only attack if a character was retired from your field by your effect this turn" attack
-  // gate, and the "cannot block characters with BP 3500 or less" static blocking restriction —
-  // both need a new conditional-attack/conditional-block engine hook that doesn't exist yet, and
-  // this is a single promo card, not worth new infra for.)
+  // character; if did, draw 1 and self gains front-line energy generation this turn, and this
+  // character may attack this turn (its "can only attack if a character was retired from your
+  // field by your effect this turn" gate, now wired via the `canAttack` hook added in the HIQ
+  // round). (Still skipped: the "cannot block characters with BP 3500 or less" static blocking
+  // restriction — no conditional-block engine hook exists for that direction yet.)
   reg['UAPR-YYH-P-001'] = {
+    canAttack(p, unit) { return unit._retiredByEffectTurn === Engine.G.turn; },
     async onMain(G, p, unit) {
       if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
       if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
@@ -37,6 +38,7 @@
       const t = targets.find(x => x.uid === uid);
       if (!t) return;
       await Engine.sidelineUnit(p, t, 'effect');
+      unit._retiredByEffectTurn = Engine.G.turn;
       Engine.draw(p, 1);
       unit.tempFrontGen = true;
       log(`${unit.card.name}: จั่ว 1 ใบ และผลิต energy บน Front Line ได้เทิร์นนี้`);
