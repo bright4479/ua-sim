@@ -81,7 +81,7 @@ function makeBotController() {
       if (p.front.length < 4) {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
-          .filter(c => c && c.type === 'Character')
+          .filter(c => c && c.type === 'Character' && !Engine.parseKeywords(c).cannotEnterFront)
           .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (b.bp || 0) - (a.bp || 0));
         if (candidates.length && (candidates[0].bp || 0) >= 2000)

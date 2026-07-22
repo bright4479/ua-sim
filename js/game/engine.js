@@ -28,6 +28,7 @@ const Engine = (() => {
       cannotAttack: false,       // "This character cannot attack." (permanent)
       unblockableByRaided: false, // "This character cannot be blocked by characters in raided state." (permanent)
       cannotMove: false,          // "This character cannot move." (permanent)
+      cannotEnterFront: false,    // "This card cannot be played to the Front Line." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -74,6 +75,8 @@ const Engine = (() => {
     if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot move\.?\s*$/i.test(seg.trim()))) kw.cannotMove = true;
     // "This character cannot be blocked by characters in raided state." (permanent)
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
+    // "This card cannot be played to the Front Line." (permanent zone restriction — hand-play only)
+    if (/This card cannot be played to the Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -137,6 +140,8 @@ const Engine = (() => {
       tempUnblockableBP: null,    // granted "cannot be blocked by characters with BP N or less" this turn
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
       tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
+      tempCannotMove: false,    // granted "cannot move" until a scheduled point (temp counterpart to kw.cannotMove) —
+                                // cleared by whatever Engine.scheduleDelayedAction the granting effect scheduled
       enteredTurn: G.turn,      // G.turn at the moment this unit entered the field — for "a character
                                 // that came into play this turn" conditions, from ANY source (play/raid/zone)
       attackedThisTurn: 0,
@@ -515,7 +520,7 @@ const Engine = (() => {
       if (idx < 0) continue;
       const u = fromLine[idx];
       if (u.card.type !== 'Character') continue;
-      if (u.kw.cannotMove) continue;
+      if (u.kw.cannotMove || u.tempCannotMove) continue;
       if (mv.to === 'energy' && !u.kw.step) continue;   // only Step can go back
       if (mv.to === 'front' && blockEnergyToFront) continue; // "opponent cannot move Energy Line to Front Line during their next Move Phase"
       if (toLine.length >= 4) {
@@ -602,6 +607,7 @@ const Engine = (() => {
     if (!c) return;
     if (c.type === 'Field' && act.line !== 'energy') throw new Error('Site ลงได้เฉพาะ Energy Line');
     if (c.type !== 'Character' && c.type !== 'Field') throw new Error('ลงสนามได้เฉพาะ Character/Site');
+    if (c.type === 'Character' && act.line === 'front' && parseKeywords(c).cannotEnterFront) throw new Error('การ์ดนี้ลง Front Line ไม่ได้');
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
     const apCost = effectiveAp(p, c);
     if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
@@ -1045,7 +1051,7 @@ const Engine = (() => {
   // is full, `removeUid` (already chosen via the controller) picks the card evicted
   // to Removal. Returns true on success.
   async function moveUnitFree(owner, unit, toLine, removeUid) {
-    if (unit.kw.cannotMove) return false;
+    if (unit.kw.cannotMove || unit.tempCannotMove) return false;
     const from = owner.front.includes(unit) ? owner.front : owner.energy;
     const dest = toLine === 'front' ? owner.front : owner.energy;
     if (from === dest) return false;
