@@ -771,6 +771,18 @@
         rules.push({ when, cond: { oppLifeMax: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
+      // "If there is a character on your opponent's area/Front Line with BP N or more, this
+      // character gets/gains +M BP."
+      if ((m = rest.match(/^If there is a character on your opponent'?s (area|field|Front Line) with BP (\d+) or more, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { oppBpMin: parseInt(m[2]), zone: parseZone(m[1]) }, amount: parseInt(m[3]) });
+        continue;
+      }
+      // "If there are N or more other characters on your area/Front Line, this character gets/gains
+      // +M BP." — bare count, no name/trait qualifier (unlike the <NAME>/<Trait:X> rule above).
+      if ((m = rest.match(/^If there are (\d+) or more other characters (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { bareOtherCount: parseInt(m[1]), zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
+        continue;
+      }
     }
     if (!rules.length) return null;
     return (owner, unit) => {
@@ -784,6 +796,15 @@
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
           else if (r.cond.nameOrTrait) { if (countNameOrTrait(owner, unit, { ...r.cond.nameOrTrait, zone: r.cond.zone }) < r.cond.n) continue; }
           else if (r.cond.oppLifeMax != null) { if ((Engine.opponentOf(owner).life || []).length > r.cond.oppLifeMax) continue; }
+          else if (r.cond.oppBpMin != null) {
+            const enemy = Engine.opponentOf(owner);
+            const pool = r.cond.zone === 'front' ? enemy.front : [...enemy.front, ...enemy.energy];
+            if (!pool.some(u => u.card.type === 'Character' && Engine.bp(u) >= r.cond.oppBpMin)) continue;
+          }
+          else if (r.cond.bareOtherCount != null) {
+            const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
+            if (pool.filter(u => u !== unit && u.card.type === 'Character').length < r.cond.bareOtherCount) continue;
+          }
           else if (r.cond.differentNames) {
             const pool = r.cond.zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
             const names = new Set(pool.filter(u => (!r.cond.other || u !== unit) &&
