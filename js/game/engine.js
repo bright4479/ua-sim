@@ -93,6 +93,10 @@ const Engine = (() => {
     // approximated as blanket immunity from opponent targeting (a slight over-grant when the
     // printed text is actually scoped to only Character-effects or only Event-cards, but safe).
     if (/cannot be chosen by your opponent'?s (?:character'?s effect|event card(?: from hand)?|event'?s effect|effect)/i.test(fx)) kw.untargetable = true;
+    // "This character cannot be rested, moved or returned to the hand by your opponent's effects."
+    // — a narrower bodyguard-style protection than full untargetability, approximated as the same
+    // blanket kw.untargetable flag (slight over-grant, consistent with the approximation above).
+    if (/cannot be rested,? moved,? or returned to (?:the|your) hand by (?:your )?opponent'?s effects/i.test(fx)) kw.untargetable = true;
     return kw;
   }
 
@@ -124,6 +128,7 @@ const Engine = (() => {
       tempImpact: 0,          // extra Impact granted "during this turn"
       tempDmg: 0,             // Damage(N) override granted "during this turn" (0 = use printed value)
       tempGen: 0,             // extra energy generation granted "during this turn"
+      genPersist: 0,          // extra energy generation granted "until start of your next turn"
       tempFrontGen: false,    // granted front-line energy generation "during this turn"
       frontGenPersist: false, // granted front-line energy generation "until start of your next turn"
       retireAtEndOfMain: false, // scheduled self-retire at the end of this Main Phase
@@ -238,7 +243,7 @@ const Engine = (() => {
     const hook = Effects.registry[u.no]?.genMod;
     const modBonus = u.effectsNullified ? 0 : hook ? (hook(u, p) || 0)
       : (Effects.genericGenMod ? (Effects.genericGenMod(p, u) || 0) : 0);
-    const bonus = (u.effectsNullified ? 0 : selfGenBonus(u)) + (u.tempGen || 0) + modBonus;
+    const bonus = (u.effectsNullified ? 0 : selfGenBonus(u)) + (u.tempGen || 0) + (u.genPersist || 0) + modBonus;
     gen[col] = (gen[col] || 0) + (u.card.gen || 0) + bonus;
   }
   // "This character also generates energy on the Front Line" — printed unconditionally (kw.frontGen),
@@ -438,7 +443,7 @@ const Engine = (() => {
       for (const a of due) { try { await a.fn(); } catch (e) { console.error(e); } }
     }
     // 1: abilities lasting "until the start of your next turn" expire
-    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u._movedThisTurn = false; }
+    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u.genPersist = 0; u._movedThisTurn = false; }
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
