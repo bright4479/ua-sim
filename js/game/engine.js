@@ -434,6 +434,7 @@ const Engine = (() => {
     p._paidApByEffectThisTurn = 0;
     G.retiredThisTurn = 0;
     G._triggerActivatedThisTurn = false;
+    p._dealtDamageThisTurn = false;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
@@ -804,6 +805,7 @@ const Engine = (() => {
   async function dealDamage(attackerP, defenderP, n, atkUnit) {
     n = Math.min(n, defenderP.life.length);
     if (n <= 0) { checkLifeWin(attackerP, defenderP); return; }
+    attackerP._dealtDamageThisTurn = true; // for "if a character on your area dealt damage to your opponent this turn" cards
     const picked = await attackerP.controller.chooseLifeCards(attackerP, defenderP, n);
     const revealed = [];
     for (const idx of picked.sort((a, b) => b - a)) {
