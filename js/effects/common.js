@@ -392,6 +392,13 @@
     const m = fx.match(/^\[When Attacking\]\s*This character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i);
     return m ? parseInt(m[1]) : null;
   }
+  // "[On Play] All characters on your area/Front Line get +N BP during this turn." — unconditional,
+  // no target choice, applies to every own character at once.
+  function matchAllOwnBuff(fx) {
+    const m = fx.match(/^\[On Play\]\s*All characters (?:on|in) your (area|field|Front Line) (?:gets?|gains?) \+(\d+) ?BP(?: during this turn)?\.?$/i);
+    if (!m) return null;
+    return { zone: parseZone(m[1]), amount: parseInt(m[2]) };
+  }
   // "Place N cards from the top of your deck to the Outside Area." (unconditional mill, no choice)
   // — `fx` still carries its "[On Play]"/"[On Retire]" marker prefix (findClause doesn't strip it).
   function matchPlainMillOutside(fx) {
@@ -567,6 +574,10 @@
       if (Engine.G.retiredThisTurn) await debuffEnemyFront(p, -parseInt(m[1]));
     } else if (/^\[On Play\]/i.test(fx) && (m = matchBounceEnemy(fx))) {
       await bounceEnemyFront(p, m);
+    } else if ((rc = matchAllOwnBuff(fx))) {
+      const pool = rc.zone === 'front' ? p.front : [...p.front, ...p.energy];
+      for (const u of pool) u.bpMod += rc.amount;
+      log(`[On Play] ${unit.card.name}: character ทุกตัวของคุณ +${rc.amount} BP เทิร์นนี้`);
     } else if ((m = matchPlainMillOutside(fx))) {
       const n = Math.min(m, p.deck.length);
       if (n) {

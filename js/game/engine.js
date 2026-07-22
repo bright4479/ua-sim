@@ -451,6 +451,8 @@ const Engine = (() => {
     p._eventsUsedThisTurn = 0;
     p._placedToOutsideThisTurn = 0;
     p._paidApByEffectThisTurn = 0;
+    p._eventNeedsPlayedThisTurn = 0;
+    p._cannotUseEventsThisTurn = false;
     G.retiredThisTurn = 0;
     G._triggerActivatedThisTurn = false;
     p._dealtDamageThisTurn = false;
@@ -496,6 +498,9 @@ const Engine = (() => {
     for (const t of (c.traits || '').split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean))
       p._playedTraitsThisTurn.add(t);
     p._playedApCostsThisTurn.add(c.ap || 0);
+    // highest original required-energy among Event Cards used this turn — for "if you used an
+    // Event Card with an original required energy of N or more during this turn" conditions
+    if (c.type === 'Event') p._eventNeedsPlayedThisTurn = Math.max(p._eventNeedsPlayedThisTurn || 0, c.need || 0);
   }
   function draw(p, n) {
     for (let i = 0; i < n; i++) {
@@ -693,6 +698,7 @@ const Engine = (() => {
     if (hi < 0) return;
     const c = UAData.byNo.get(act.no);
     if (c.type !== 'Event') return;
+    if (p._cannotUseEventsThisTurn) { p.controller.notify?.('ใช้ Event Card เทิร์นนี้ไม่ได้'); return; }
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
     const apCost = effectiveAp(p, c);
     if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }

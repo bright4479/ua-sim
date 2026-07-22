@@ -9,7 +9,7 @@ global.document = { getElementById: () => null, querySelectorAll: () => [], crea
 global.DeckBuilder = { toast: () => {} };
 
 const src = ['data/cards.js', 'js/data.js', 'js/game/engine.js', 'js/game/bot.js',
-             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js', 'js/effects/jjk.js', 'js/effects/blc.js', 'js/effects/tsk.js', 'js/effects/kmy.js', 'js/effects/kgr.js', 'js/effects/smd.js', 'js/effects/gmr.js', 'js/effects/blk.js', 'js/effects/kmr.js', 'js/effects/opm.js', 'js/effects/kin.js', 'js/effects/yyh.js', 'js/effects/hiq.js', 'js/effects/tlr.js', 'js/effects/gim.js']
+             'js/effects/common.js', 'js/effects/mcr.js', 'js/effects/eva.js', 'js/effects/htr.js', 'js/effects/ark.js', 'js/effects/cgh.js', 'js/effects/and.js', 'js/effects/slg.js', 'js/effects/jjk.js', 'js/effects/blc.js', 'js/effects/tsk.js', 'js/effects/kmy.js', 'js/effects/kgr.js', 'js/effects/smd.js', 'js/effects/gmr.js', 'js/effects/blk.js', 'js/effects/kmr.js', 'js/effects/opm.js', 'js/effects/kin.js', 'js/effects/yyh.js', 'js/effects/hiq.js', 'js/effects/tlr.js', 'js/effects/gim.js', 'js/effects/snf.js']
   .map(p => readFileSync(p, 'utf8')).join('\n;\n') +
   '\n;globalThis.UAData = UAData; globalThis.Engine = Engine; globalThis.Effects = Effects;';
 (0, eval)(src);
