@@ -63,7 +63,12 @@
     const picked = await p.controller.chooseRevealPick(p, revealed, title || 'ดูการ์ดบนสุดของเด็ค', predicate, maxPick);
     const taken = [];
     picked.sort((a, b) => b - a).forEach(i => { taken.push(revealed.splice(i, 1)[0]); });
-    for (const no of taken) { p.hand.push(no); log(`${p.name}: เพิ่ม ${UAData.byNo.get(no)?.name} เข้ามือ`); }
+    for (const no of taken) {
+      p.hand.push(no);
+      log(`${p.name}: เพิ่ม ${UAData.byNo.get(no)?.name} เข้ามือ`);
+      const c = UAData.byNo.get(no);
+      if (c && c.color !== 'Yellow' && Engine.parseKeywords(c).raidTargets.length) p._revealedNonYellowRaidThisTurn = true;
+    }
     p.deck.push(...revealed); // remainder to bottom, original relative order
     return taken;
   }
@@ -713,8 +718,9 @@
       if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
       else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
 
-      // unconditional: "This character gets/gains +N BP." (or bare "This Character +1000BP.")
-      if ((m = rest.match(/^This [Cc]haracter (?:(?:gets|gains) )?\+(\d+) ?BP\.?$/i))) {
+      // unconditional: "This character gets/gains +N BP." (or bare "This Character +1000BP.") — also
+      // covers a turn-gated negative flat modifier like "[Opponent's Turn] This character gains -1500 BP."
+      if ((m = rest.match(/^This [Cc]haracter (?:(?:gets|gains) )?([+-]?\d+) ?BP\.?$/i))) {
         if (when !== 'always') rules.push({ when, cond: null, amount: parseInt(m[1]) }); // always-on flat bonus would be printed BP, skip
         continue;
       }

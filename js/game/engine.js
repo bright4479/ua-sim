@@ -43,6 +43,7 @@ const Engine = (() => {
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
     if (/Play this (?:field|site|character|card) (?:to your area )?(?:in an? active(?: state)?|set to active|as active|and set (?:it|this character) to active)/i.test(fx)) kw.entersActive = true;
+    if (/This (?:field|site|character|card) is played as active/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) comes (?:in)?to play as [Aa]ctive/i.test(fx)) kw.entersActive = true;
     if (/This (?:field|site|character|card) is active when played (?:onto|to|in) (?:the|your) (?:field|area)/i.test(fx)) kw.entersActive = true;
     // "This character/Field is played in active." (sometimes gated by a condition clause first)
@@ -435,6 +436,7 @@ const Engine = (() => {
     G.retiredThisTurn = 0;
     G._triggerActivatedThisTurn = false;
     p._dealtDamageThisTurn = false;
+    p._revealedNonYellowRaidThisTurn = false;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
