@@ -891,6 +891,13 @@
     return !!frontGenEvalCache.get(card.no);
   };
 
+  // "[When in Frontline] You may extra draw without paying AP." — a per-card registry declaration
+  // (`freeExtraDraw: true`) checked live from the Start Phase's extra-draw step, rather than a hook
+  // function, since the grant is a simple static flag with no board-state condition to evaluate.
+  Effects.hasFreeExtraDraw = function (p) {
+    return p.front.some(u => Effects.registry[u.no]?.freeExtraDraw);
+  };
+
   // ---------- generic [Main] and [On Retire] patterns ----------
   function matchOnMain(card) {
     const fx = findClause(card.effect, /^\[Main\]/i);

@@ -26,6 +26,7 @@ const Engine = (() => {
       untargetable: false,       // "cannot be chosen by your opponent's (character's) effect / Event Card" (approximated as full immunity)
       cannotBlock: false,        // "This character cannot block." (permanent, unlike the per-turn unit.noBlock field)
       cannotAttack: false,       // "This character cannot attack." (permanent)
+      unblockableByRaided: false, // "This character cannot be blocked by characters in raided state." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -62,6 +63,8 @@ const Engine = (() => {
     if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot block\.?\s*$/i.test(seg.trim()))) kw.cannotBlock = true;
     // "This character cannot attack." (permanent, printed as its own bare clause)
     if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot attack\.?\s*$/i.test(seg.trim()))) kw.cannotAttack = true;
+    // "This character cannot be blocked by characters in raided state." (permanent)
+    if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -124,6 +127,7 @@ const Engine = (() => {
       tempSnipe: false,         // granted [Sniper] "during this turn" (cleared every End Phase)
       tempUnblockableBP: null,    // granted "cannot be blocked by characters with BP N or less" this turn
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
+      tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
       enteredTurn: G.turn,      // G.turn at the moment this unit entered the field — for "a character
                                 // that came into play this turn" conditions, from ANY source (play/raid/zone)
       attackedThisTurn: 0,
@@ -429,6 +433,7 @@ const Engine = (() => {
     p._placedToOutsideThisTurn = 0;
     p._paidApByEffectThisTurn = 0;
     G.retiredThisTurn = 0;
+    G._triggerActivatedThisTurn = false;
     // "at the start of your turn" effects (checked before readying, in case they read carried-over state)
     for (const u of [...p.front, ...p.energy]) await Effects.onTurnStart(G, p, u);
     if (G.over) return;
@@ -447,13 +452,16 @@ const Engine = (() => {
       if (!draw(p, 1)) return; // deck out -> lose
     }
     update();
-    // 5: extra draw (once, pay 1 AP)
-    if (activeAP(p) >= 1 && p.deck.length > 0) {
-      const want = await p.controller.chooseExtraDraw(p);
-      if (want && payAP(p, 1)) {
-        p.extraDrawUsed = true;
-        draw(p, 1);
-        log(`${p.name} จ่าย 1 AP จั่วเพิ่ม (extra draw)`);
+    // 5: extra draw (once per turn; normally costs 1 AP, free if a Front Line card grants it)
+    if (p.deck.length > 0) {
+      const free = Effects.hasFreeExtraDraw?.(p);
+      if (free || activeAP(p) >= 1) {
+        const want = await p.controller.chooseExtraDraw(p);
+        if (want && (free || payAP(p, 1))) {
+          p.extraDrawUsed = true;
+          draw(p, 1);
+          log(`${p.name} ${free ? '' : 'จ่าย 1 AP '}จั่วเพิ่ม (extra draw)`);
+        }
       }
     }
     update();
@@ -487,6 +495,8 @@ const Engine = (() => {
     update();
     // controller returns list of moves {uid, to:'front'|'energy'}
     const moves = await p.controller.chooseMovements(p);
+    const blockEnergyToFront = p._blockEnergyToFrontNextMove;
+    p._blockEnergyToFrontNextMove = false; // consumed on this, the very next Move Phase for this player
     for (const mv of moves || []) {
       const fromLine = mv.to === 'front' ? p.energy : p.front;
       const toLine = mv.to === 'front' ? p.front : p.energy;
@@ -495,6 +505,7 @@ const Engine = (() => {
       const u = fromLine[idx];
       if (u.card.type !== 'Character') continue;
       if (mv.to === 'energy' && !u.kw.step) continue;   // only Step can go back
+      if (mv.to === 'front' && blockEnergyToFront) continue; // "opponent cannot move Energy Line to Front Line during their next Move Phase"
       if (toLine.length >= 4) {
         // must remove one card from destination to removal area
         const removedUid = mv.removeUid;
@@ -708,7 +719,8 @@ const Engine = (() => {
           (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP) &&
           (atk.kw.unblockableBPMin == null || bp(u) < atk.kw.unblockableBPMin) &&
           (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
-          (atk.tempUnblockableBPMin == null || bp(u) < atk.tempUnblockableBPMin));
+          (atk.tempUnblockableBPMin == null || bp(u) < atk.tempUnblockableBPMin) &&
+          (!atk.kw.unblockableByRaided || !u.under.length));
         if (candidates.length) {
           const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
           if (b) {
@@ -827,6 +839,7 @@ const Engine = (() => {
 
   async function resolveTrigger(p, c) {
     const enemy = opponentOf(p);
+    G._triggerActivatedThisTurn = true; // for "if you/opponent activated a Trigger effect this turn" cards
     switch (c.trigger) {
       case 'Draw':
         draw(p, 1);
@@ -900,6 +913,7 @@ const Engine = (() => {
       for (const u of line) {
         if (u.card.type !== 'Character') continue;
         if (u.kw.raidTargets.length) continue; // target must not possess Raid
+        if (u.tempRaidable) { out.push(u); continue; } // "your [Raid] cards can raid on this character" grant — any raider qualifies
         for (const t of kw.raidTargets) {
           if (t.kind === 'name' && ((u.card.name || '').includes(t.value) || u.kw.alsoTreatedAs.some(a => a.includes(t.value) || t.value.includes(a)))) out.push(u);
           else if (t.kind === 'trait' && (u.card.traits || '').includes(t.value)) out.push(u);
@@ -956,7 +970,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
     update();
   }
