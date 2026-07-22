@@ -27,6 +27,7 @@ const Engine = (() => {
       cannotBlock: false,        // "This character cannot block." (permanent, unlike the per-turn unit.noBlock field)
       cannotAttack: false,       // "This character cannot attack." (permanent)
       unblockableByRaided: false, // "This character cannot be blocked by characters in raided state." (permanent)
+      cannotMove: false,          // "This character cannot move." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -60,10 +61,17 @@ const Engine = (() => {
     // ... or "BP N or more/higher" — the opposite direction (only weak characters may block).
     const unblockMin = fx.match(/cannot be blocked by characters? with (?:BP ?(\d+)|(\d+) ?BP) or (?:more|higher)/i);
     if (unblockMin) kw.unblockableBPMin = parseInt(unblockMin[1] || unblockMin[2]);
-    // "This character cannot block." (permanent, printed as its own bare clause)
-    if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot block\.?\s*$/i.test(seg.trim()))) kw.cannotBlock = true;
-    // "This character cannot attack." (permanent, printed as its own bare clause)
-    if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot attack\.?\s*$/i.test(seg.trim()))) kw.cannotAttack = true;
+    // "This character cannot block." / "cannot attack." / "cannot attack or block." (permanent,
+    // printed as its own bare clause — the combined form covers both flags from one match).
+    {
+      const cannotSeg = fx.split('@').find(seg => /^\s*\d*\s*This character cannot (?:attack|block)(?: or (?:attack|block))?\.?\s*$/i.test(seg.trim()));
+      if (cannotSeg) {
+        if (/attack/i.test(cannotSeg)) kw.cannotAttack = true;
+        if (/block/i.test(cannotSeg)) kw.cannotBlock = true;
+      }
+    }
+    // "This character cannot move." (permanent — blocks both Movement Phase moves and effect-driven moves)
+    if (fx.split('@').some(seg => /^\s*\d*\s*This character cannot move\.?\s*$/i.test(seg.trim()))) kw.cannotMove = true;
     // "This character cannot be blocked by characters in raided state." (permanent)
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
@@ -507,6 +515,7 @@ const Engine = (() => {
       if (idx < 0) continue;
       const u = fromLine[idx];
       if (u.card.type !== 'Character') continue;
+      if (u.kw.cannotMove) continue;
       if (mv.to === 'energy' && !u.kw.step) continue;   // only Step can go back
       if (mv.to === 'front' && blockEnergyToFront) continue; // "opponent cannot move Energy Line to Front Line during their next Move Phase"
       if (toLine.length >= 4) {
@@ -1036,6 +1045,7 @@ const Engine = (() => {
   // is full, `removeUid` (already chosen via the controller) picks the card evicted
   // to Removal. Returns true on success.
   async function moveUnitFree(owner, unit, toLine, removeUid) {
+    if (unit.kw.cannotMove) return false;
     const from = owner.front.includes(unit) ? owner.front : owner.energy;
     const dest = toLine === 'front' ? owner.front : owner.energy;
     if (from === dest) return false;

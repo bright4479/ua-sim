@@ -218,12 +218,12 @@
   const RX = {
     onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     apActive: /^Choose up to (\d+) (?:of your )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
-    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your (?:area|field))?,?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
-    onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line,?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
+    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your (?:area|field))?[.,]?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
+    onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line[.,]?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:(?:up to )?1 (?:of your )?other|another) [Cc]haracters?(?: in your (?:area|field))?(?: on your (?:area|field))?,?\s*(?:and )?(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:(?:up to )?1 (?:of your )?other|another) [Cc]haracters?(?: in your (?:area|field))?(?: on your (?:area|field))?[.,]?\s*(?:and )?(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
