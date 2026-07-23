@@ -77,7 +77,7 @@ const Engine = (() => {
     // "This character cannot be blocked by characters in raided state." (permanent)
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card cannot be played to the Front Line." (permanent zone restriction — hand-play only)
-    if (/This card cannot be played to the Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
+    if (/This card cannot be played to (?:the )?Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
