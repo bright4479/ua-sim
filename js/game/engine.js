@@ -276,7 +276,7 @@ const Engine = (() => {
     if (m) delta -= parseInt(m[1]);
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
-    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
+    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
@@ -316,6 +316,9 @@ const Engine = (() => {
     const fx = card.effect || '';
     const m = fx.match(/If there is a <([^>]+)> on your area, reduce the AP cost of this card in your hand by (\d+)/i);
     if (m && [...p.front, ...p.energy].some(u => (u.card.name || '').includes(m[1]))) return -parseInt(m[2]);
+    // "If there is a <NAME> on your Front Line, in your hand, this card's AP Cost is reduced by -N."
+    const fm = fx.match(/If there is a <([^>]+)> on your Front Line, in your hand, this card'?s AP Cost is reduced by -(\d+)/i);
+    if (fm && p.front.some(u => (u.card.name || '').includes(fm[1]))) return -parseInt(fm[2]);
     const tm = fx.match(/If there are (\d+) or more <Trait:?\s*([^>]+)> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by (\d+)/i);
     if (tm) {
       const need = parseInt(tm[1]), trait = tm[2].trim().toLowerCase();
@@ -341,12 +344,13 @@ const Engine = (() => {
     const fx = card.effect || '';
     return /Reduce the required energy of this card in your hand(?: and Outside Area)? by \d+/i.test(fx) ||
       /If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by \d+/i.test(fx) ||
-      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
+      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
       /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?this (?:card|character)'?s energy consumption -\d+/i.test(fx) ||
       /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+/i.test(fx) ||
+      /If there is a <[^>]+> on your Front Line, in your hand, this card'?s AP Cost is reduced by -\d+/i.test(fx) ||
       /If there are \d+ or more <Trait:?\s*[^>]+> (?:cards?|characters?) on your area, reduce (?:this card'?s|the) AP cost (?:of this card )?in your hand by \d+/i.test(fx) ||
       /If there (?:are|is) a total of \d+ or more <[^>]+> (?:and\/or other|and) <Trait:?\s*[^>]+>(?: (?:cards?|characters?))? on your area, reduce the AP cost of (?:of )?this card in your hand by \d+/i.test(fx);
   }
@@ -831,6 +835,9 @@ const Engine = (() => {
         const dmg = (atk.tempDmg || atk.kw.dmg || 1) + dmgBonusHook;
         await dealDamage(p, enemy, dmg, atk);
         if (G.over) return;
+        // temporary "[1 Per Turn] when this character attacks and it is not blocked, draw 1 card"
+        // grant (from another card's effect, not this unit's own printed text)
+        if (atk._grantedUnblockedDraw && p.deck.length) { draw(p, 1); log(`${atk.card.name}: จั่ว 1 ใบ (ได้รับความสามารถชั่วคราว)`); }
         // Field/other-unit passive watchers: "When your <NAME>'s attack is not blocked, ..." —
         // only fires on a genuinely unblocked attack (no blocker AND no snipe target), unlike
         // onAnyWinBattle/onAnyLoseBattle which require SOME defender to have been determined.
@@ -1020,7 +1027,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
     update();
   }

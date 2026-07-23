@@ -229,7 +229,7 @@
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
   // character at the end of your Main Phase." — printed near-identically on ~90 cards across the
   // whole game (a cheap "burn a body for a temporary energy boost" archetype piece).
-  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This (?:character|Field) gets \+(\d+)(?:\s*\[?\w*\]?)? generated(?:\s*\[?\w*\]?)? energy(?:\s*\[?\w*\]?)? (?:and "At the end of your Main Phase, retire this (?:character|Field)\."|during this turn|for this turn)/i;
+  const RX_SELF_GEN_RETIRE = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This (?:character|Field) gets \+(\d+)(?:\s*\[?\w*\]?)? generated(?:\s*\[?\w*\]?)? energy(?:\s*\[?\w*\]?)?\s*(?:and "At the end of your Main Phase, retire this (?:character|Field)\."|during this turn|for this turn)/i;
   // newer-series wording: "This character gains [purple] energy generation and 'At the end of
   // the main phase, retire this character' until the end of the turn." (always +1)
   const RX_SELF_GEN_RETIRE2 = /^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*This (?:character|Field) gains (?:\[?\w+\]?\s*)?energy generation and ["“']*At the end of (?:your|the) [Mm]ain [Pp]hase, retire this (?:character|Field)\.?["”']*\s*during this turn\.?$/i;
