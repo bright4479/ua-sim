@@ -958,6 +958,9 @@
     // HTR-style: "This character generates 1 additional [blue] energy. At the end of the main phase, retire this character."
     if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this (?:character|field) generates (\d+) additional (?:\[?\w+\]?\s*)?energy\.?\s*At the end of the [Mm]ain [Pp]hase, retire this (?:character|field)\.?$/i)))
       return { kind: 'selfGenRetire', n: parseInt(m[1]) };
+    // GNT-style: "For this turn this character generate +N [color] Energy. During end of main phase, retire this card."
+    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*For this turn this (?:character|card|field) generate \+(\d+)(?:\s*\[?\w*\]?)? Energy\.?\s*During end of main phase, retire this (?:character|card|field)\.?$/i)))
+      return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[1]) };
     if ((m = fx.match(RX.mainDiscardImpact))) return { kind: 'discardImpact', discardN: parseInt(m[1]), impact: parseInt(m[2]) };
     // "[Main] [Rest this card] Look at the top card / 1 card from the top ... top or bottom"
