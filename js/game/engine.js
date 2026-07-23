@@ -29,6 +29,7 @@ const Engine = (() => {
       unblockableByRaided: false, // "This character cannot be blocked by characters in raided state." (permanent)
       cannotMove: false,          // "This character cannot move." (permanent)
       cannotEnterFront: false,    // "This card cannot be played to the Front Line." (permanent)
+      retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -77,6 +78,8 @@ const Engine = (() => {
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card cannot be played to the Front Line." (permanent zone restriction — hand-play only)
     if (/This card cannot be played to the Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
+    // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
+    if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -147,6 +150,8 @@ const Engine = (() => {
       tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
       tempCannotMove: false,    // granted "cannot move" until a scheduled point (temp counterpart to kw.cannotMove) —
                                 // cleared by whatever Engine.scheduleDelayedAction the granting effect scheduled
+      tempCannotAttack: false, // granted "cannot attack" until a scheduled point (temp counterpart to kw.cannotAttack)
+      tempCannotBlock: false,  // granted "cannot block" until a scheduled point (temp counterpart to kw.cannotBlock)
       enteredTurn: G.turn,      // G.turn at the moment this unit entered the field — for "a character
                                 // that came into play this turn" conditions, from ANY source (play/raid/zone)
       attackedThisTurn: 0,
@@ -725,7 +730,7 @@ const Engine = (() => {
       const decl = await p.controller.chooseAttacker(p, enemy);
       if (!decl) break; // end phase
       const atk = p.front.find(u => u.uid === decl.uid);
-      if (!atk || atk.rested || atk.kw.cannotAttack) continue;
+      if (!atk || atk.rested || atk.kw.cannotAttack || atk.tempCannotAttack) continue;
       // per-card conditional attack restriction ("this character can only attack if ...") —
       // registry-defined and evaluated live, unlike the permanent kw.cannotAttack flag.
       if (Effects.registry[atk.no]?.canAttack && !Effects.registry[atk.no].canAttack(p, atk)) continue;
@@ -752,7 +757,7 @@ const Engine = (() => {
       // blocking (not allowed vs snipe-target attacks)
       let blocker = null;
       if (!targetUnit) {
-        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock && !u.kw.cannotBlock &&
+        const candidates = enemy.front.filter(u => !u.rested && u.card.type === 'Character' && !u.noBlock && !u.kw.cannotBlock && !u.tempCannotBlock &&
           (atk.kw.unblockableBP == null || bp(u) > atk.kw.unblockableBP) &&
           (atk.kw.unblockableBPMin == null || bp(u) < atk.kw.unblockableBPMin) &&
           (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
@@ -1048,7 +1053,7 @@ const Engine = (() => {
     // already handled unit.counters itself, skipping the default dump-to-sideline.
     const handled = unit.counters.length && await Effects.onBeforeLeaveCounters(G, owner, unit, reason);
     if (!handled && unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
-    owner.sideline.push(unit.no);
+    (unit.kw.retireToRemoval ? owner.removal : owner.sideline).push(unit.no);
     await Effects.onLeaveField(G, owner, unit);
     await Effects.onSideline(G, owner, unit, reason);
     // per-unit reactive watchers (e.g. "when THIS opponent's character retires, do X"), registered
@@ -1119,6 +1124,7 @@ const Engine = (() => {
     const u = makeUnit(no);
     u._playedByEffect = true; // for "[On Play] If this character was played by your effect, ..." cards
     u._playedFromDeck = zone === 'deck'; // for "[On Play] If this character is played from the deck, ..." cards
+    u._playedFromSideline = zone === 'sideline'; // for "[On Play] If this character is played from the Outside Area, ..." cards
     if (zone === 'deck') owner._playedFromDeckThisTurn = true; // for "[Your Turn] If you played a card from your deck during this turn, ..." cards
     u.rested = !active;
     dest.push(u);
