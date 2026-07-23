@@ -13,7 +13,7 @@ const Engine = (() => {
       snipe: /\[Snipe\]/i.test(fx),
       doubleAttack: /\[Double Attack\]/i.test(fx),
       doubleBlock: /\[Double Block\]/i.test(fx),
-      nullifyImpact: /\[(Nullify Impact|Impact Negate)\]/i.test(fx),
+      nullifyImpact: /\[(Nullify Impact|Impact Negate|Impact Nagate)\]/i.test(fx), // "Nagate" is a recurring data-entry typo of "Negate"
       impact: 0,
       dmg: 1,
       raidTargets: [],
