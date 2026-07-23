@@ -453,6 +453,8 @@ const Engine = (() => {
     p._paidApByEffectThisTurn = 0;
     p._eventNeedsPlayedThisTurn = 0;
     p._cannotUseEventsThisTurn = false;
+    p._returnedToHandThisTurn = 0;
+    p._playedFromDeckThisTurn = false;
     G.retiredThisTurn = 0;
     G._triggerActivatedThisTurn = false;
     p._dealtDamageThisTurn = false;
@@ -1067,6 +1069,7 @@ const Engine = (() => {
     unit.under = [];
     if (unit.counters.length) { owner.sideline.push(...unit.counters); unit.counters = []; }
     owner.hand.push(unit.no);
+    owner._returnedToHandThisTurn = (owner._returnedToHandThisTurn || 0) + 1; // for "if a character returned to your hand during this turn" cards
     await Effects.onLeaveField(G, owner, unit);
   }
 
@@ -1115,9 +1118,11 @@ const Engine = (() => {
     owner[zone].splice(idx, 1);
     const u = makeUnit(no);
     u._playedByEffect = true; // for "[On Play] If this character was played by your effect, ..." cards
+    u._playedFromDeck = zone === 'deck'; // for "[On Play] If this character is played from the deck, ..." cards
+    if (zone === 'deck') owner._playedFromDeckThisTurn = true; // for "[Your Turn] If you played a card from your deck during this turn, ..." cards
     u.rested = !active;
     dest.push(u);
-    const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : 'Removal';
+    const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : zone === 'deck' ? 'เด็ค' : 'Removal';
     log(`${owner.name}: ${c.name} ถูกนำลง ${line === 'front' ? 'Front' : 'Energy'} Line จาก${zoneLabel}`);
     await Effects.onPlay(G, owner, u);
     return u;
