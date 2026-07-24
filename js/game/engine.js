@@ -471,6 +471,7 @@ const Engine = (() => {
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
     p._playedApCostsThisTurn = new Set();
+    p._cardsPlayedFromHandThisTurn = 0;
     p._eventsUsedThisTurn = 0;
     p._placedToOutsideThisTurn = 0;
     p._paidApByEffectThisTurn = 0;
@@ -524,6 +525,7 @@ const Engine = (() => {
     for (const t of (c.traits || '').split(/[,;]/).map(s => s.trim().toLowerCase()).filter(Boolean))
       p._playedTraitsThisTurn.add(t);
     p._playedApCostsThisTurn.add(c.ap || 0);
+    p._cardsPlayedFromHandThisTurn = (p._cardsPlayedFromHandThisTurn || 0) + 1; // for "if you used N or more cards from your hand during this turn" cards
     // highest original required-energy among Event Cards used this turn — for "if you used an
     // Event Card with an original required energy of N or more during this turn" conditions
     if (c.type === 'Event') p._eventNeedsPlayedThisTurn = Math.max(p._eventNeedsPlayedThisTurn || 0, c.need || 0);
@@ -832,6 +834,10 @@ const Engine = (() => {
           // temporary "when this character attacks and wins a battle, draw 1 card" grant (from
           // another card's effect, not this unit's own printed text)
           if (atk._grantedOnWinDraw) { draw(p, 1); log(`${atk.card.name}: จั่ว 1 ใบ (ได้รับความสามารถชั่วคราว)`); }
+          // temporary "when this character attacks and wins a battle, set this character active"
+          // grant (from another card's effect) — checked engine-level like _grantedOnWinDraw above,
+          // since the grant can target any card number, not just the granting card's own.
+          if (atk._grantedOnWinActive) { atk.rested = false; log(`${atk.card.name}: Active (ได้รับความสามารถชั่วคราว)`); }
           // Field/other-unit passive watchers: "[1 Per Turn] When a character from your area
           // attacks and wins a battle, draw 1 card." — not keyed to the attacker's own card no.
           for (const u of [...p.front, ...p.energy]) {
@@ -1052,7 +1058,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
     update();
   }
@@ -1200,7 +1206,7 @@ const Engine = (() => {
     raidTargetsFor, opponentOf, findUnit, hasTextCostDiscount,
     // API for the effects layer
     draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
-    scheduleDelayedAction, payApForEffect,
+    scheduleDelayedAction, payApForEffect, dealDamage,
   };
 })();
 
