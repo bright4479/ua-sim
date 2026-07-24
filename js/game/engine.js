@@ -563,6 +563,7 @@ const Engine = (() => {
       if (u.card.type !== 'Character') continue;
       if (u.kw.cannotMove || u.tempCannotMove) continue;
       if (mv.to === 'front' && u.kw.cannotMoveToFront) continue;
+      if (mv.to === 'front' && Effects.registry[u.no]?.canMoveToFront && !Effects.registry[u.no].canMoveToFront(p, u)) continue;
       if (mv.to === 'energy' && !u.kw.step) continue;   // only Step can go back
       if (mv.to === 'front' && blockEnergyToFront) continue; // "opponent cannot move Energy Line to Front Line during their next Move Phase"
       if (toLine.length >= 4) {
@@ -1064,6 +1065,7 @@ const Engine = (() => {
     for (const pl of G.players)
       for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedAttackDrawN = null; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
+    G._noRemovalByEffectsThisTurn = false;
     update();
   }
 
@@ -1083,6 +1085,7 @@ const Engine = (() => {
   // reason: 'battle' | 'effect' | 'bp0'
   async function sidelineUnit(owner, unit, reason = 'effect') {
     if (unit.noRetire) { log(`${unit.card.name}: ไม่ถูก retire (ผล "will not be retired")`); return; }
+    if (reason === 'effect' && G._noRemovalByEffectsThisTurn) { log(`${unit.card.name}: ไม่ถูก retire (ผล "cannot be removed by effects" เทิร์นนี้)`); return; }
     G.retiredThisTurn = (G.retiredThisTurn || 0) + 1; // tracked for "if a character was retired this turn" cards
     for (const line of [owner.front, owner.energy]) {
       const i = line.indexOf(unit);
@@ -1127,6 +1130,7 @@ const Engine = (() => {
   async function moveUnitFree(owner, unit, toLine, removeUid) {
     if (unit.kw.cannotMove || unit.tempCannotMove) return false;
     if (toLine === 'front' && unit.kw.cannotMoveToFront) return false;
+    if (toLine === 'front' && Effects.registry[unit.no]?.canMoveToFront && !Effects.registry[unit.no].canMoveToFront(owner, unit)) return false;
     const from = owner.front.includes(unit) ? owner.front : owner.energy;
     const dest = toLine === 'front' ? owner.front : owner.energy;
     if (from === dest) return false;
@@ -1245,6 +1249,9 @@ const Engine = (() => {
 //     them leaves the front/energy line for any reason (retire OR return to hand), e.g. "if a
 //     <NAME> on your area was retired during this turn, ..." (wired once, centrally, inside
 //     common.js's Effects.onLeaveField wrapper; the "onAnyLeaveField" gap noted since HIQ)
+//   canMoveToFront(p,unit) -> boolean — per-card static restriction on being MOVED to the Front
+//     Line (Movement Phase or moveUnitFree), evaluated live — sibling of canPlayFromHand for the
+//     "cannot be played or moved to the Front Line unless <NAME> is present" combo wording
 //   canPlayFromHand(p,card) -> boolean — per-card static restriction on being played from hand at
 //     all, evaluated live (e.g. "If there is a <NAME> other than this card on your area, you cannot
 //     play this card from your hand"); checked in playCard/bot.js's candidate filters, distinct
