@@ -161,6 +161,7 @@ const Engine = (() => {
       tempUnblockableBP: null,    // granted "cannot be blocked by characters with BP N or less" this turn
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
       tempUnblockableNeedMin: null, // granted "cannot be blocked by characters with required energy N or more" (approximated as lasting the rest of the turn, not just "until the end of the attack")
+      tempCanAttackFromEnergy: false, // granted "this character can attack from your Energy Line" this turn
       tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
       tempCannotMove: false,    // granted "cannot move" until a scheduled point (temp counterpart to kw.cannotMove) —
                                 // cleared by whatever Engine.scheduleDelayedAction the granting effect scheduled
@@ -759,7 +760,7 @@ const Engine = (() => {
       if (G.over) return;
       const decl = await p.controller.chooseAttacker(p, enemy);
       if (!decl) break; // end phase
-      const atk = p.front.find(u => u.uid === decl.uid);
+      const atk = p.front.find(u => u.uid === decl.uid) || p.energy.find(u => u.uid === decl.uid && u.tempCanAttackFromEnergy);
       if (!atk || atk.rested || atk.kw.cannotAttack || atk.tempCannotAttack) continue;
       // per-card conditional attack restriction ("this character can only attack if ...") —
       // registry-defined and evaluated live, unlike the permanent kw.cannotAttack flag.
@@ -1058,7 +1059,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
     update();
   }
