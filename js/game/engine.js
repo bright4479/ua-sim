@@ -150,6 +150,7 @@ const Engine = (() => {
       tempSnipe: false,         // granted [Sniper] "during this turn" (cleared every End Phase)
       tempUnblockableBP: null,    // granted "cannot be blocked by characters with BP N or less" this turn
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
+      tempUnblockableNeedMin: null, // granted "cannot be blocked by characters with required energy N or more" (approximated as lasting the rest of the turn, not just "until the end of the attack")
       tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
       tempCannotMove: false,    // granted "cannot move" until a scheduled point (temp counterpart to kw.cannotMove) —
                                 // cleared by whatever Engine.scheduleDelayedAction the granting effect scheduled
@@ -465,6 +466,7 @@ const Engine = (() => {
     p._paidApByEffectThisTurn = 0;
     p._eventNeedsPlayedThisTurn = 0;
     p._cannotUseEventsThisTurn = false;
+    p._cannotPlayFromHandThisTurn = false;
     p._returnedToHandThisTurn = 0;
     p._playedFromDeckThisTurn = false;
     G.retiredThisTurn = 0;
@@ -626,6 +628,7 @@ const Engine = (() => {
 
   // play character/site from hand: act = {no, line:'front'|'energy', removeUid?}
   async function playCard(p, act) {
+    if (p._cannotPlayFromHandThisTurn) { p.controller.notify?.('ใช้การ์ดจากมือเทิร์นนี้ไม่ได้'); return; }
     const hi = p.hand.indexOf(act.no);
     if (hi < 0) return;
     const c = UAData.byNo.get(act.no);
@@ -665,6 +668,7 @@ const Engine = (() => {
     let raider = null, fromHand = false;
     if (act.no) {
       if (!p.hand.includes(act.no)) return;
+      if (p._cannotPlayFromHandThisTurn) { p.controller.notify?.('ใช้การ์ดจากมือเทิร์นนี้ไม่ได้'); return; }
       if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
       if (activeAP(p) < effectiveAp(p, c)) { p.controller.notify?.('AP ไม่พอ'); return; }
       fromHand = true;
@@ -713,7 +717,7 @@ const Engine = (() => {
     if (hi < 0) return;
     const c = UAData.byNo.get(act.no);
     if (c.type !== 'Event') return;
-    if (p._cannotUseEventsThisTurn) { p.controller.notify?.('ใช้ Event Card เทิร์นนี้ไม่ได้'); return; }
+    if (p._cannotUseEventsThisTurn || p._cannotPlayFromHandThisTurn) { p.controller.notify?.('ใช้ Event Card เทิร์นนี้ไม่ได้'); return; }
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
     const apCost = effectiveAp(p, c);
     if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
@@ -771,6 +775,7 @@ const Engine = (() => {
           (atk.kw.unblockableBPMin == null || bp(u) < atk.kw.unblockableBPMin) &&
           (atk.tempUnblockableBP == null || bp(u) > atk.tempUnblockableBP) &&
           (atk.tempUnblockableBPMin == null || bp(u) < atk.tempUnblockableBPMin) &&
+          (atk.tempUnblockableNeedMin == null || (u.card.need || 0) < atk.tempUnblockableNeedMin) &&
           (!atk.kw.unblockableByRaided || !u.under.length));
         if (candidates.length) {
           const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
@@ -1032,7 +1037,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedAttackDraw = false; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
     p.pendingDiscount = null;
     update();
   }
