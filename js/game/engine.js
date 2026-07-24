@@ -31,6 +31,7 @@ const Engine = (() => {
       cannotEnterFront: false,    // "This card cannot be played to the Front Line." (permanent)
       cannotEnterEnergy: false,   // "This card cannot be played on the Energy Line." (permanent — opposite of cannotEnterFront)
       cannotMoveToFront: false,   // "This card cannot be moved to the Front Line." (permanent — narrower than cannotMove: can still move TO the Energy Line via Step etc.)
+      raidableByAny: false,       // "You can raid this character with your character cards without the required Raided card." (permanent — any raider qualifies, like tempRaidable but printed/static)
       retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
@@ -85,6 +86,8 @@ const Engine = (() => {
     if (/This card cannot be played on (?:the )?Energy Line\.?/i.test(fx)) kw.cannotEnterEnergy = true;
     // "... and cannot be moved to the Front Line." (permanent — narrower than cannotMove)
     if (/cannot be moved to (?:the )?Front Line\.?/i.test(fx)) kw.cannotMoveToFront = true;
+    // "You can raid this character with your character cards without the required Raided card." (permanent)
+    if (/can raid this character with your character cards without the required Raided card/i.test(fx)) kw.raidableByAny = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
@@ -645,6 +648,10 @@ const Engine = (() => {
     if (c.type !== 'Character' && c.type !== 'Field') throw new Error('ลงสนามได้เฉพาะ Character/Site');
     if (c.type === 'Character' && act.line === 'front' && parseKeywords(c).cannotEnterFront) throw new Error('การ์ดนี้ลง Front Line ไม่ได้');
     if (c.type === 'Character' && act.line === 'energy' && parseKeywords(c).cannotEnterEnergy) throw new Error('การ์ดนี้ลง Energy Line ไม่ได้');
+    // per-card static restriction on being played from hand at all (board-state gated, e.g.
+    // "If there is a <NAME> other than this card on your area, you cannot play this card from
+    // your hand"), evaluated live — distinct from the permanent zone-restriction keywords above.
+    if (Effects.registry[c.no]?.canPlayFromHand && !Effects.registry[c.no].canPlayFromHand(p, c)) { p.controller.notify?.('การ์ดนี้ลงจากมือไม่ได้ตอนนี้'); return; }
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
     const apCost = effectiveAp(p, c);
     if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
@@ -988,7 +995,7 @@ const Engine = (() => {
       for (const u of line) {
         if (u.card.type !== 'Character') continue;
         if (u.kw.raidTargets.length) continue; // target must not possess Raid
-        if (u.tempRaidable) { out.push(u); continue; } // "your [Raid] cards can raid on this character" grant — any raider qualifies
+        if (u.tempRaidable || u.kw.raidableByAny) { out.push(u); continue; } // "your [Raid] cards can raid on this character" (temp grant or permanent printed keyword) — any raider qualifies
         for (const t of kw.raidTargets) {
           if (t.kind === 'name' && ((u.card.name || '').includes(t.value) || u.kw.alsoTreatedAs.some(a => a.includes(t.value) || t.value.includes(a)))) out.push(u);
           else if (t.kind === 'trait' && (u.card.traits || '').includes(t.value)) out.push(u);
@@ -1133,7 +1140,7 @@ const Engine = (() => {
   // plays card `no` from `zone` ('hand' | 'removal') onto owner's line, bypassing the
   // normal hand-play energy gate (the calling effect script is responsible for any
   // condition check printed on the card). Optionally spends the card's AP cost.
-  async function playCardFromZone(owner, no, zone, { line = 'energy', active = false, payApCost = false, removeUid } = {}) {
+  async function playCardFromZone(owner, no, zone, { line = 'energy', active = false, payApCost = false, removeUid, skipOnPlay = false } = {}) {
     const idx = owner[zone].indexOf(no);
     if (idx < 0) return null;
     const c = UAData.byNo.get(no);
@@ -1157,7 +1164,10 @@ const Engine = (() => {
     dest.push(u);
     const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : zone === 'deck' ? 'เด็ค' : 'Removal';
     log(`${owner.name}: ${c.name} ถูกนำลง ${line === 'front' ? 'Front' : 'Energy'} Line จาก${zoneLabel}`);
-    await Effects.onPlay(G, owner, u);
+    // `skipOnPlay` is for the rare "your and your opponent's character played with this effect do
+    // not activate their [On Play] effects" mechanic — the calling effect script is responsible
+    // for deciding when this applies; every other caller leaves it false.
+    if (!skipOnPlay) await Effects.onPlay(G, owner, u);
     return u;
   }
 
@@ -1225,6 +1235,10 @@ const Engine = (() => {
 //     them leaves the front/energy line for any reason (retire OR return to hand), e.g. "if a
 //     <NAME> on your area was retired during this turn, ..." (wired once, centrally, inside
 //     common.js's Effects.onLeaveField wrapper; the "onAnyLeaveField" gap noted since HIQ)
+//   canPlayFromHand(p,card) -> boolean — per-card static restriction on being played from hand at
+//     all, evaluated live (e.g. "If there is a <NAME> other than this card on your area, you cannot
+//     play this card from your hand"); checked in playCard/bot.js's candidate filters, distinct
+//     from the permanent zone-restriction keywords (cannotEnterFront/cannotEnterEnergy)
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
 //   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
 //                                     same field ("All your <X> get +N BP"); must not call Engine.bp()

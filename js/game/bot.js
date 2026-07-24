@@ -56,6 +56,7 @@ function makeBotController() {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
           .filter(c => c && (c.type === 'Character' || c.type === 'Field') && !(c.type === 'Character' && Engine.parseKeywords(c).cannotEnterEnergy))
+          .filter(c => !(Effects.registry[c.no]?.canPlayFromHand && !Effects.registry[c.no].canPlayFromHand(p, c)))
           .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (a.need || 0) - (b.need || 0) || (a.ap || 0) - (b.ap || 0));
         if (candidates.length)
@@ -82,6 +83,7 @@ function makeBotController() {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
           .filter(c => c && c.type === 'Character' && !Engine.parseKeywords(c).cannotEnterFront)
+          .filter(c => !(Effects.registry[c.no]?.canPlayFromHand && !Effects.registry[c.no].canPlayFromHand(p, c)))
           .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (b.bp || 0) - (a.bp || 0));
         if (candidates.length && (candidates[0].bp || 0) >= 2000)
