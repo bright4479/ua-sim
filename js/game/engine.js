@@ -452,7 +452,7 @@ const Engine = (() => {
       for (const a of due) { try { await a.fn(); } catch (e) { console.error(e); } }
     }
     // 1: abilities lasting "until the start of your next turn" expire
-    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u.genPersist = 0; u._movedThisTurn = false; }
+    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u.genPersist = 0; u._movedThisTurn = false; u._movedByEffectThisTurn = false; }
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
@@ -1106,6 +1106,7 @@ const Engine = (() => {
     from.splice(idx, 1);
     dest.push(unit);
     unit._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
+    unit._movedByEffectThisTurn = true; // narrower: "moved outside of your Move Phase during this turn" (moveUnitFree is the effect-driven mover; the normal Movement Phase loop never sets this)
     log(`${owner.name}: ${unit.card.name} ย้ายไป ${toLine === 'front' ? 'Front' : 'Energy'} Line`);
     return true;
   }
@@ -1198,6 +1199,10 @@ const Engine = (() => {
 //   onAnyUnblockedAttack(G,p,atkUnit,selfUnit) — fires on EVERY unit p controls (including the
 //     attacker) whenever ANY of them attacks and is genuinely unblocked (no blocker, no snipe
 //     target) — the "unblocked attack" detection gap noted in several earlier rounds, now available
+//   onAnyLeaveField(G,p,leftUnit,selfUnit) — fires on EVERY unit p still controls whenever ANY of
+//     them leaves the front/energy line for any reason (retire OR return to hand), e.g. "if a
+//     <NAME> on your area was retired during this turn, ..." (wired once, centrally, inside
+//     common.js's Effects.onLeaveField wrapper; the "onAnyLeaveField" gap noted since HIQ)
 //   bpBonus(p,unit) -> number       — dynamic passive BP addition, re-evaluated every time bp() is read
 //   auraBp(owner,srcUnit,tgtUnit) -> number — aura printed on srcUnit granting BP to OTHER units on the
 //                                     same field ("All your <X> get +N BP"); must not call Engine.bp()

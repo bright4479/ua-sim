@@ -1062,4 +1062,18 @@
       }
     }
   };
+
+  // broadcasts "when ANY of your characters leaves the front/energy line (retire, return to
+  // hand, etc.), ..." — the recurring "onAnyLeaveField" watcher gap noted since the HIQ round,
+  // now available. Fires on every OTHER unit p currently controls (the leaving unit has already
+  // been spliced out of front/energy by the time onLeaveField runs, in both sidelineUnit and
+  // returnUnitToHand).
+  const origOnLeaveField = Effects.onLeaveField.bind(Effects);
+  Effects.onLeaveField = async function (G, p, unit) {
+    await origOnLeaveField(G, p, unit);
+    for (const u of [...p.front, ...p.energy]) {
+      const h = this.registry[u.no]?.onAnyLeaveField;
+      if (h) await h(G, p, unit, u);
+    }
+  };
 })();
