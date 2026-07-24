@@ -89,6 +89,9 @@ const Engine = (() => {
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
+    // "This card is treated as both <NAME1> and <NAME2>." (same alternate-identity concept, "both...and" wording)
+    const treatedBoth = fx.matchAll(/This (?:card|character) is treated as both <([^>]+)> and <([^>]+)>/gi);
+    for (const t of treatedBoth) { kw.alsoTreatedAs.push(t[1].trim()); kw.alsoTreatedAs.push(t[2].trim()); }
     // "This character (also/can) generates energy on/when in (your/the) Front Line." (unconditional,
     // self, printed as its own clause — conditional/granted-to-others variants are handled by
     // Effects.genericFrontGen in common.js, evaluated live)
