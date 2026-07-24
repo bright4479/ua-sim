@@ -30,6 +30,7 @@ const Engine = (() => {
       cannotMove: false,          // "This character cannot move." (permanent)
       cannotEnterFront: false,    // "This card cannot be played to the Front Line." (permanent)
       cannotEnterEnergy: false,   // "This card cannot be played on the Energy Line." (permanent — opposite of cannotEnterFront)
+      cannotMoveToFront: false,   // "This card cannot be moved to the Front Line." (permanent — narrower than cannotMove: can still move TO the Energy Line via Step etc.)
       retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
@@ -81,6 +82,8 @@ const Engine = (() => {
     if (/This card cannot be played to (?:the )?Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
     // "This card cannot be played on the Energy Line." (permanent zone restriction — front-only)
     if (/This card cannot be played on (?:the )?Energy Line\.?/i.test(fx)) kw.cannotEnterEnergy = true;
+    // "... and cannot be moved to the Front Line." (permanent — narrower than cannotMove)
+    if (/cannot be moved to (?:the )?Front Line\.?/i.test(fx)) kw.cannotMoveToFront = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
@@ -548,6 +551,7 @@ const Engine = (() => {
       const u = fromLine[idx];
       if (u.card.type !== 'Character') continue;
       if (u.kw.cannotMove || u.tempCannotMove) continue;
+      if (mv.to === 'front' && u.kw.cannotMoveToFront) continue;
       if (mv.to === 'energy' && !u.kw.step) continue;   // only Step can go back
       if (mv.to === 'front' && blockEnergyToFront) continue; // "opponent cannot move Energy Line to Front Line during their next Move Phase"
       if (toLine.length >= 4) {
@@ -1101,6 +1105,7 @@ const Engine = (() => {
   // to Removal. Returns true on success.
   async function moveUnitFree(owner, unit, toLine, removeUid) {
     if (unit.kw.cannotMove || unit.tempCannotMove) return false;
+    if (toLine === 'front' && unit.kw.cannotMoveToFront) return false;
     const from = owner.front.includes(unit) ? owner.front : owner.energy;
     const dest = toLine === 'front' ? owner.front : owner.energy;
     if (from === dest) return false;
