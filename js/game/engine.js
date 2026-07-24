@@ -29,6 +29,7 @@ const Engine = (() => {
       unblockableByRaided: false, // "This character cannot be blocked by characters in raided state." (permanent)
       cannotMove: false,          // "This character cannot move." (permanent)
       cannotEnterFront: false,    // "This card cannot be played to the Front Line." (permanent)
+      cannotEnterEnergy: false,   // "This card cannot be played on the Energy Line." (permanent — opposite of cannotEnterFront)
       retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
@@ -78,6 +79,8 @@ const Engine = (() => {
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card cannot be played to the Front Line." (permanent zone restriction — hand-play only)
     if (/This card cannot be played to (?:the )?Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
+    // "This card cannot be played on the Energy Line." (permanent zone restriction — front-only)
+    if (/This card cannot be played on (?:the )?Energy Line\.?/i.test(fx)) kw.cannotEnterEnergy = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
@@ -630,6 +633,7 @@ const Engine = (() => {
     if (c.type === 'Field' && act.line !== 'energy') throw new Error('Site ลงได้เฉพาะ Energy Line');
     if (c.type !== 'Character' && c.type !== 'Field') throw new Error('ลงสนามได้เฉพาะ Character/Site');
     if (c.type === 'Character' && act.line === 'front' && parseKeywords(c).cannotEnterFront) throw new Error('การ์ดนี้ลง Front Line ไม่ได้');
+    if (c.type === 'Character' && act.line === 'energy' && parseKeywords(c).cannotEnterEnergy) throw new Error('การ์ดนี้ลง Energy Line ไม่ได้');
     if (!hasEnergyFor(p, c)) { p.controller.notify?.('Energy ไม่พอ'); return; }
     const apCost = effectiveAp(p, c);
     if (activeAP(p) < apCost) { p.controller.notify?.('AP ไม่พอ'); return; }
@@ -728,6 +732,7 @@ const Engine = (() => {
   async function attackPhase(p) {
     G.phase = 'Attack';
     update();
+    for (const u of [...p.front, ...p.energy]) await Effects.onAttackPhaseStart(G, p, u);
     const enemy = opponentOf(p);
     for (;;) {
       if (G.over) return;
@@ -1185,6 +1190,9 @@ const Engine = (() => {
 //   onLeaveField(G,p,unit)    — unit leaves front/energy line for any reason
 //   onSideline(G,p,unit,reason) — unit specifically sidelined ('battle'|'effect'|'bp0')
 //   onTurnStart(G,p,unit)     — start of the unit owner's turn
+//   onAttackPhaseStart(G,p,unit) — start of the unit owner's own Attack Phase (later in the same
+//     turn than onTurnStart), e.g. "[When in Frontline] At the start of your Attack Phase, if this
+//     character is active, choose up to 1 of your AP cards and set it to active."
 //   onRaided(G,p,targetNo,raiderUnit) — fires on the covered card's own script when raided on
 //   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
 //   onDefenderWinBattle(G,p,unit,atkP,atkUnit) — fires on a successful BLOCKER's own card (the
@@ -1254,6 +1262,15 @@ const Effects = {
   // fires for every one of p's own units at the start of p's turn
   async onTurnStart(G, p, unit) {
     const h = this.registry[unit.no]?.onTurnStart;
+    if (h) await h(G, p, unit);
+  },
+  // fires for every one of p's own units at the start of p's own Attack Phase (later in the same
+  // turn than onTurnStart) — for "[When in Frontline] At the start of your Attack Phase, ..."
+  // printed passives, and for one-shot "at the start of THIS turn's Attack Phase, ..." grants
+  // queued by an [On Play] effect earlier in the same turn (the granting card sets its own flag
+  // and checks it here).
+  async onAttackPhaseStart(G, p, unit) {
+    const h = this.registry[unit.no]?.onAttackPhaseStart;
     if (h) await h(G, p, unit);
   },
   // fires on the covered (defending) card's own script when it gets raided on

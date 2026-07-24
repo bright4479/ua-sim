@@ -55,7 +55,7 @@ function makeBotController() {
       if (p.energy.length < 4) {
         const candidates = p.hand
           .map(no => UAData.byNo.get(no))
-          .filter(c => c && (c.type === 'Character' || c.type === 'Field'))
+          .filter(c => c && (c.type === 'Character' || c.type === 'Field') && !(c.type === 'Character' && Engine.parseKeywords(c).cannotEnterEnergy))
           .filter(c => Engine.hasEnergyFor(p, c) && Engine.activeAP(p) >= Engine.effectiveAp(p, c))
           .sort((a, b) => (a.need || 0) - (b.need || 0) || (a.ap || 0) - (b.ap || 0));
         if (candidates.length)
