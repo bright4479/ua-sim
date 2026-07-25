@@ -484,6 +484,7 @@ const Engine = (() => {
     p._cannotPlayFromHandThisTurn = false;
     p._returnedToHandThisTurn = 0;
     p._playedFromDeckThisTurn = false;
+    p._playedFromSidelineThisTurn = false;
     G.retiredThisTurn = 0;
     G._triggerActivatedThisTurn = false;
     p._dealtDamageThisTurn = false;
@@ -1192,6 +1193,7 @@ const Engine = (() => {
     u._playedFromDeck = zone === 'deck'; // for "[On Play] If this character is played from the deck, ..." cards
     u._playedFromSideline = zone === 'sideline'; // for "[On Play] If this character is played from the Outside Area, ..." cards
     if (zone === 'deck') owner._playedFromDeckThisTurn = true; // for "[Your Turn] If you played a card from your deck during this turn, ..." cards
+    if (zone === 'sideline') owner._playedFromSidelineThisTurn = true; // for "[When Attacking] if a character was played from your Outside Area during this turn, ..." cards
     u.rested = !active;
     dest.push(u);
     const zoneLabel = zone === 'hand' ? 'มือ' : zone === 'sideline' ? 'Outside Area (Sideline)' : zone === 'deck' ? 'เด็ค' : 'Removal';
