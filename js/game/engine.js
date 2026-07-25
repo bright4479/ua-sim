@@ -1150,6 +1150,13 @@ const Engine = (() => {
     unit._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
     unit._movedByEffectThisTurn = true; // narrower: "moved outside of your Move Phase during this turn" (moveUnitFree is the effect-driven mover; the normal Movement Phase loop never sets this)
     log(`${owner.name}: ${unit.card.name} ย้ายไป ${toLine === 'front' ? 'Front' : 'Energy'} Line`);
+    // "[Your Turn][1/turn] when a character on your area moves outside your Move Phase, ..." —
+    // broadcast to every unit owner still controls (including the mover itself), same pattern as
+    // onAnyPlay/onAnyLeaveField.
+    for (const u of [...owner.front, ...owner.energy]) {
+      const h = Effects.registry[u.no]?.onAnyMove;
+      if (h) await h(G, owner, unit, u);
+    }
     return true;
   }
 
@@ -1247,6 +1254,10 @@ const Engine = (() => {
 //   onAnyUnblockedAttack(G,p,atkUnit,selfUnit) — fires on EVERY unit p controls (including the
 //     attacker) whenever ANY of them attacks and is genuinely unblocked (no blocker, no snipe
 //     target) — the "unblocked attack" detection gap noted in several earlier rounds, now available
+//   onAnyMove(G,p,movedUnit,selfUnit) — fires on EVERY unit p still controls whenever ANY of them
+//     moves to another line outside of the Movement Phase (wired inside moveUnitFree only, not the
+//     normal Movement Phase loop), e.g. "[Your Turn][1/turn] when a character on your area moves
+//     outside your Move Phase, you may draw 1 card"
 //   onAnyLeaveField(G,p,leftUnit,selfUnit) — fires on EVERY unit p still controls whenever ANY of
 //     them leaves the front/energy line for any reason (retire OR return to hand), e.g. "if a
 //     <NAME> on your area was retired during this turn, ..." (wired once, centrally, inside
