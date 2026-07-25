@@ -470,7 +470,7 @@ const Engine = (() => {
       for (const a of due) { try { await a.fn(); } catch (e) { console.error(e); } }
     }
     // 1: abilities lasting "until the start of your next turn" expire
-    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u.genPersist = 0; u._movedThisTurn = false; u._movedByEffectThisTurn = false; }
+    for (const u of [...p.front, ...p.energy]) { u.bpPersist = 0; u.frontGenPersist = false; u.genPersist = 0; u._movedThisTurn = false; u._movedByEffectThisTurn = false; u._moveCountThisTurn = 0; }
     p._getPlayedThisTurn = false;
     p._drewThisTurn = 0;
     p._playedTraitsThisTurn = new Set();
@@ -579,6 +579,7 @@ const Engine = (() => {
       fromLine.splice(idx, 1);
       toLine.push(u);
       u._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
+      u._moveCountThisTurn = (u._moveCountThisTurn || 0) + 1; // for "for each time this character moved this turn, ..." cards
       log(`${p.name} ย้าย ${u.card.name} ไป ${mv.to === 'front' ? 'Front Line' : 'Energy Line'}`);
     }
     update();
@@ -891,6 +892,13 @@ const Engine = (() => {
       }
       update();
     }
+    // "At the end of your Attack Phase, ..." — fires once, after the player is done declaring
+    // attacks, on every unit p still controls (the recurring "end-of-Attack-Phase hook" gap noted
+    // since GMR).
+    for (const u of [...p.front, ...p.energy]) {
+      const h = Effects.registry[u.no]?.onAttackPhaseEnd;
+      if (h) await h(G, p, u);
+    }
     update();
   }
 
@@ -1148,6 +1156,7 @@ const Engine = (() => {
     from.splice(idx, 1);
     dest.push(unit);
     unit._movedThisTurn = true; // for "if this character is moving/moved during this turn, ..." cards
+    unit._moveCountThisTurn = (unit._moveCountThisTurn || 0) + 1; // for "for each time this character moved this turn, ..." cards
     unit._movedByEffectThisTurn = true; // narrower: "moved outside of your Move Phase during this turn" (moveUnitFree is the effect-driven mover; the normal Movement Phase loop never sets this)
     log(`${owner.name}: ${unit.card.name} ย้ายไป ${toLine === 'front' ? 'Front' : 'Energy'} Line`);
     // "[Your Turn][1/turn] when a character on your area moves outside your Move Phase, ..." —
@@ -1240,6 +1249,9 @@ const Engine = (() => {
 //   onAttackPhaseStart(G,p,unit) — start of the unit owner's own Attack Phase (later in the same
 //     turn than onTurnStart), e.g. "[When in Frontline] At the start of your Attack Phase, if this
 //     character is active, choose up to 1 of your AP cards and set it to active."
+//   onAttackPhaseEnd(G,p,unit) — fires once, on every unit p still controls, right after the
+//     player finishes declaring attacks for their own Attack Phase — the recurring "end of Attack
+//     Phase" gap noted since GMR/KMY/KMR/OPM/KIN/HIQ/NIK/SNF/GIM/IMS, now available
 //   onRaided(G,p,targetNo,raiderUnit) — fires on the covered card's own script when raided on
 //   onColorTrigger(G,p,card)  — card-specific text for a [Color] life trigger
 //   onDefenderWinBattle(G,p,unit,atkP,atkUnit) — fires on a successful BLOCKER's own card (the
