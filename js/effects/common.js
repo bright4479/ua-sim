@@ -973,6 +973,9 @@
     // "[Main] [Rest this card] Choose 1 character on your opponent's Front Line, it gets -N BP during this turn"
     if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*Choose (?:up to )?1 (?:character on your opponent'?s Front Line|of your opponent'?s Front Line [Cc]haracters?),? it gets -(\d+) ?BP during this turn\.?$/i)))
       return { kind: 'restDebuffEnemy', n: parseInt(m[1]) };
+    // "[Main] [Rest this card] Draw N card(s), place N2 card(s) from your hand to the Outside Area."
+    if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*Draw (\d+) cards?,?\s*place (\d+) cards? from your hand to the Outside Area\.?$/i)))
+      return { kind: 'restDrawDiscard', drawN: parseInt(m[1]), discardN: parseInt(m[2]) };
     return null;
   }
 
@@ -1013,6 +1016,12 @@
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;
       await debuffEnemyFront(p, -mm.n);
+    } else if (mm.kind === 'restDrawDiscard') {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      draw(p, mm.drawN);
+      log(`${unit.card.name}: จั่ว ${mm.drawN} ใบ`);
+      for (let i = 0; i < mm.discardN; i++) await discardFromHand(p);
     }
   };
 
