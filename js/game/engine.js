@@ -1196,6 +1196,7 @@ const Engine = (() => {
     u._playedByEffect = true; // for "[On Play] If this character was played by your effect, ..." cards
     u._playedFromDeck = zone === 'deck'; // for "[On Play] If this character is played from the deck, ..." cards
     u._playedFromSideline = zone === 'sideline'; // for "[On Play] If this character is played from the Outside Area, ..." cards
+    u._playedFromRemoval = zone === 'removal'; // for "[On Play] If this character was played from the Remove Area, ..." cards
     if (zone === 'deck') owner._playedFromDeckThisTurn = true; // for "[Your Turn] If you played a card from your deck during this turn, ..." cards
     if (zone === 'sideline') owner._playedFromSidelineThisTurn = true; // for "[When Attacking] if a character was played from your Outside Area during this turn, ..." cards
     u.rested = !active;
