@@ -88,6 +88,8 @@ const Engine = (() => {
     if (/cannot be moved to (?:the )?Front Line\.?/i.test(fx)) kw.cannotMoveToFront = true;
     // "You can raid this character with your character cards without the required Raided card." (permanent)
     if (/can raid this character with your character cards without the required Raided card/i.test(fx)) kw.raidableByAny = true;
+    // "Your Character Cards with [Raid] can use this card to raid." (same concept, reversed subject)
+    if (/Character Cards with \[Raid\] can (?:use|raid) this (?:card|character)(?: to raid)?/i.test(fx)) kw.raidableByAny = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
