@@ -738,4 +738,31 @@
       }
     },
   };
+
+  // ---------- 2026-07-25 round: worst-covered-series pass ----------
+  // KMY-2-001 Kamado Tanjiro (2) — [Your Turn][1/turn] if a character on your area moved during
+  // this turn (approximated: not scoped to specifically your Attack Phase), choose up to 1 own
+  // character, +1000 BP.
+  reg['KMY-2-001'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      if (![...p.front, ...p.energy].some(u => u._movedThisTurn)) { p.controller.notify?.('ต้องมี character ที่ย้าย line เทิร์นนี้'); return; }
+      unit._usedTurn = Engine.G.turn;
+      await H.buffOwnCharacter(p, 1000);
+    },
+  };
+
+  // KMY-2-002 Kamado Nezuko — [When in Energy Line] at the start of your Attack Phase, choose 1
+  // own Front Line character, switch position with this character.
+  reg['KMY-2-002'] = {
+    async onAttackPhaseStart(G, p, unit) {
+      if (!p.energy.includes(unit) || !p.front.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, p.front, `${unit.card.name}: เลือก character บน Front Line เพื่อสลับตำแหน่ง`);
+      const t = p.front.find(x => x.uid === uid);
+      if (!t) return;
+      const ei = p.energy.indexOf(unit), fi = p.front.indexOf(t);
+      p.energy[ei] = t; p.front[fi] = unit;
+      log(`${unit.card.name}: สลับตำแหน่งกับ ${t.card.name}`);
+    },
+  };
 })();
