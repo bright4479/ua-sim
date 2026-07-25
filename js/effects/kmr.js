@@ -900,4 +900,169 @@
       if (taken.length) await H.discardFromHand(p);
     },
   };
+
+  // ---------- 2026-07-25 round: worst-covered-series pass ----------
+  function hasNamed2(p, name) { return [...p.front, ...p.energy].some(u => (u.card.name || '').includes(name)); }
+  function countDistinctAmong(p, names) {
+    const pool = [...p.front, ...p.energy].map(u => u.card).concat(p.sideline.map(no => byNo(no)));
+    return new Set(pool.filter(c => c && names.some(n => (c.name || '').includes(n))).map(c => c.name)).size;
+  }
+
+  // EX12BT-KMR-2-026 "Taka Medal" — gated by an "OOO"-named character on your Energy Line: play up
+  // to 1 Blue "OOO"-named character (need<=3, ap=1) from your hand to your area rested. (Skipped:
+  // "treated as both Ankh and Core Medal" flavor text, the conditional self-cost-reduction clause,
+  // and forcing this Event card itself to the Remove Area after resolving — recurring "resolved
+  // Event card always goes to sideline" architecture limitation.)
+  reg['EX12BT-KMR-2-026'] = {
+    async onEvent(G, p, card) {
+      if (!p.energy.some(u => (u.card.name || '').includes('OOO'))) { p.controller.notify?.('ต้องมี character ชื่อ OOO บน Energy Line'); return; }
+      const i = p.hand.findIndex(no => { const c = byNo(no); return c && c.type === 'Character' && c.color === 'Blue' && (c.name || '').includes('OOO') && (c.need || 0) <= 3 && (c.ap || 0) === 1; });
+      if (i < 0 || p.front.length >= 4) return;
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+    },
+  };
+
+  // EX12BT-KMR-2-028 Kamen Rider Nadeshiko — when a "Fourze"-named character is played from your
+  // Remove Area, you may retire this active character and place 1 card from your hand to the
+  // Outside Area; if you did, choose up to 1 "Fourze"-named character and set it to active.
+  reg['EX12BT-KMR-2-028'] = {
+    async onAnyPlay(G, p, playedUnit, selfUnit) {
+      if (!playedUnit._playedFromRemoval || !(playedUnit.card.name || '').includes('Fourze') || selfUnit.rested) return;
+      const v = await p.controller.chooseOption(p, `${selfUnit.card.name}: Retire ตัวเอง + ทิ้งการ์ดจากมือ?`, [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      const no = await H.discardFromHand(p);
+      if (no == null) return;
+      await Engine.sidelineUnit(p, selfUnit, 'effect');
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.name || '').includes('Fourze'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${selfUnit.card.name}: เลือก character ชื่อ Fourze`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.rested = false; log(`${selfUnit.card.name}: ${t.card.name} ตั้งขึ้น`); }
+    },
+  };
+
+  // EX12BT-KMR-2-033 Kamen Rider Fourze Base States (2) — when this character is blocked, may
+  // draw 1, if you did place 1 card from your hand to the Outside Area.
+  reg['EX12BT-KMR-2-033'] = {
+    async onBeingBlocked(G, p, atkUnit, blockerUnit) {
+      const v = await p.controller.chooseOption(p, `${atkUnit.card.name}: จั่ว 1 ใบ?`, [{ label: 'จั่ว', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      Engine.draw(p, 1); log(`${atkUnit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // EX12BT-KMR-2-040 Powerdizer — [When in Energy Line] at the end of your Attack Phase, may move
+  // this character to the Front Line. (Skipped: the [Main] grant-ability clause — dynamic
+  // temp-granted "at end of a lost attack, place both to Remove Area" is too narrow to build new
+  // infra for a single card.)
+  reg['EX12BT-KMR-2-040'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.energy.includes(unit) || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ย้ายไป Front Line?`, [{ label: 'ย้าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await Engine.moveUnitFree(p, unit, 'front');
+    },
+  };
+
+  // EX12BT-KMR-2-054 Kamen Rider W HeatMetal — when this character is blocked, look at the top
+  // card of your deck, place it on top or bottom. (Skipped: the "if played by Memory Change this
+  // turn, draw up to 1 instead" upgrade clause — no tracker for which specific card played this
+  // unit.)
+  reg['EX12BT-KMR-2-054'] = { async onBeingBlocked(G, p, atkUnit, blockerUnit) { await H.scryTop(p, ['top', 'bottom']); } };
+
+  // EX12BT-KMR-2-055 Kamen Rider W FangJoker — [When Attacking][1/turn] may rest 1 active "W"-named
+  // Front Line character, if you did set this character to active, +500 BP. @[On Play] (raid only)
+  // return 1 raid source card to hand, place 1 card from hand to the Outside Area. (Skipped: the
+  // static "cannot be played other than by raiding" restriction.)
+  reg['EX12BT-KMR-2-055'] = {
+    async onPlay(G, p, unit) {
+      if (!unit.under.length) return;
+      const no = unit.under.shift();
+      p.hand.push(no);
+      log(`${unit.card.name}: เพิ่ม ${byNo(no)?.name} (raid source) เข้ามือ`);
+      await H.discardFromHand(p);
+    },
+    async onAttack(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      const targets = p.front.filter(u => u !== unit && !u.rested && (u.card.name || '').includes('W'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: วางนอน character ชื่อ W? (ไม่บังคับ)`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      unit._usedTurn = Engine.G.turn;
+      t.rested = true; unit.rested = false; unit.bpMod += 500;
+      log(`${unit.card.name}: ตั้งขึ้น, +500 BP เทิร์นนี้`);
+    },
+  };
+
+  // EX12BT-KMR-2-070 Kamen Rider Agito (DCD) — passive: if a "Decade"-named character is on your
+  // area, this character also generates energy on the Front Line.
+  reg['EX12BT-KMR-2-070'] = { frontGenBonus(p, unit) { return hasNamed2(p, 'Decade'); } };
+
+  // EX12BT-KMR-2-083 Kamen Rider Faiz — at the end of an attack this character was blocked, choose
+  // up to 1 character BP<=3000 that blocked this character and retire it.
+  reg['EX12BT-KMR-2-083'] = {
+    async onBeingBlocked(G, p, atkUnit, blockerUnit) {
+      if (Engine.bp(blockerUnit) > 3000) return;
+      const v = await p.controller.chooseOption(p, `${atkUnit.card.name}: Retire ${blockerUnit.card.name}?`, [{ label: 'Retire', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) { await Engine.sidelineUnit(Engine.opponentOf(p), blockerUnit, 'effect'); log(`${atkUnit.card.name}: ${blockerUnit.card.name} ถูก retire`); }
+    },
+  };
+
+  // UA29BT-KMR-1-076 Kamen Rider Den-O Climax Form — tiers based on distinct types of Momotaros/
+  // Urataros/Kintaros/Ryutaros on your area and Outside Area. @2+: [On Play] set active, draw 1.
+  // @4+: [When Attacking] raid up to 1 Character Card (need<=3, ap=1) with "Den-O" in its name from
+  // your hand, +1000 BP.
+  const DENO_NAMES = ['Momotaros', 'Urataros', 'Kintaros', 'Ryutaros'];
+  reg['UA29BT-KMR-1-076'] = {
+    async onPlay(G, p, unit) {
+      if (countDistinctAmong(p, DENO_NAMES) < 2) return;
+      unit.rested = false;
+      Engine.draw(p, 1); log(`${unit.card.name}: ตั้งขึ้น Active, จั่ว 1 ใบ`);
+    },
+    async onAttack(G, p, unit) {
+      if (countDistinctAmong(p, DENO_NAMES) < 4) return;
+      const i = p.hand.findIndex(no => { const c = byNo(no); return c && c.type === 'Character' && (c.need || 0) <= 3 && (c.ap || 0) === 1 && (c.name || '').includes('Den-O'); });
+      if (i < 0) return;
+      const no = p.hand[i];
+      const targets = [...p.front, ...p.energy].filter(u2 => Engine.parseKeywords(u2.card).raidTargets.length && !u2.kw.untargetable && !u2.tempUntargetable);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: raid ${byNo(no)?.name} ทับใคร?`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      p.hand.splice(i, 1);
+      if (t.counters.length) { p.sideline.push(...t.counters); t.counters = []; }
+      const targetNo = t.no, targetUnder = t.under;
+      t.under = [targetNo, ...targetUnder]; t.no = no; t.card = byNo(no); t.rested = false;
+      log(`${unit.card.name}: raid ${t.card.name} ทับการ์ดเดิม`);
+      await Effects.onRaided(G, p, targetNo, t);
+      await Effects.onPlay(G, p, t);
+      t.bpMod += 1000;
+      log(`${unit.card.name}: ${t.card.name} +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // UA29BT-KMR-1-085 Kamen Rider Faiz Axel Form — [When Attacking][1/turn] set active, draw 2, may
+  // discard 1 Trait:Faiz Gear from hand, if you did retire 1 enemy Front Line BP<=1500. @at the end
+  // of your Attack Phase, place the top card of this character's Raid State to the Outside Area.
+  // (Skipped: the "can only be played by Raid" static restriction.)
+  reg['UA29BT-KMR-1-085'] = {
+    async onAttack(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      unit._usedTurn = Engine.G.turn;
+      unit.rested = false;
+      Engine.draw(p, 2); log(`${unit.card.name}: ตั้งขึ้น Active, จั่ว 2 ใบ`);
+      const i = p.hand.findIndex(no => (byNo(no)?.traits || '').includes('Faiz Gear'));
+      if (i < 0) return;
+      const no = p.hand.splice(i, 1)[0]; p.sideline.push(no); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
+      log(`${unit.card.name}: ส่ง ${byNo(no)?.name} ไป Outside Area`);
+      await H.retireEnemyFront(p, 1500);
+    },
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!unit.under.length) return;
+      const layer = unit.under.shift();
+      p.sideline.push(layer);
+      log(`${unit.card.name}: การ์ดบนสุดของ Raid State ไป Outside Area`);
+    },
+  };
 })();

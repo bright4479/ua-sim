@@ -816,6 +816,8 @@ const Engine = (() => {
               blocker.blockedThisTurn++;
               log(`${enemy.name}: ${blocker.card.name} บล็อก!`);
               await Effects.onBlock(G, enemy, blocker, atk);
+              const beingBlockedHook = Effects.registry[atk.no]?.onBeingBlocked;
+              if (beingBlockedHook) await beingBlockedHook(G, p, atk, blocker);
               if (blocker.kw.doubleBlock && blocker.blockedThisTurn === 1) {
                 blocker.rested = false;
                 log(`[Double Block] ${blocker.card.name} กลับเป็น Active`);
@@ -1248,6 +1250,10 @@ const Engine = (() => {
 //   onPlay(G,p,unit)          — when the card enters the field (normal play or Raid)
 //   onAttack(G,p,unit)        — when the unit declares an attack
 //   onBlock(G,p,unit)         — when the unit is declared as a blocker
+//   onBeingBlocked(G,p,atkUnit,blockerUnit) — fires on the ATTACKER's own registry the instant a
+//     blocker is declared against it (before the battle resolves) — for "when this character is
+//     blocked / at the end of an attack in which this character was blocked" cards, as opposed to
+//     onBlock which fires on the BLOCKER's registry
 //   onEvent(G,p,card)         — when an Event card is used
 //   onMain(G,p,unit)          — [Activate: Main] ability, invoked by the player via the unit menu
 //   onLeaveField(G,p,unit)    — unit leaves front/energy line for any reason
