@@ -649,4 +649,116 @@
   //    correctly for their core stats/keywords, but their bonus text still
   //    needs manual adjudication via the unit's ±BP / rest / sideline menu.
   // ────────────────────────────────────────────────────────────────────────
+
+  // ---------- 2026-07-25 round: worst-covered-series pass ----------
+  function isYourTurn(p) { return Engine.G.players[Engine.G.active] === p; }
+  function hasNamed(p, name) { return [...p.front, ...p.energy].some(u => (u.card.name || '').includes(name)); }
+
+  // 003 Rei Ayanami — passive: if a character with [Get] trigger was played on your area this
+  // turn, +1000 BP.
+  reg['UA44BT-EVA-1-003'] = {
+    bpBonus(p, unit) { return (isYourTurn(p) && unit._getPlayedTurn === Engine.G.turn) ? 1000 : 0; },
+    onAnyPlay(G, p, playedUnit, selfUnit) { if (playedUnit.card.trigger === 'Get') selfUnit._getPlayedTurn = Engine.G.turn; },
+  };
+
+  // 018 Mari Illustrious Makinami — [When Attacking] may pay 1 AP, if you did draw 1, choose up
+  // to 1 other own character, set it to active. (Skipped: the "[Draw]/[Active]→[Get] trigger
+  // swap" reactive — no hook for redirecting trigger resolution.)
+  reg['UA44BT-EVA-1-018'] = {
+    async onAttack(G, p, unit) {
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: จ่าย 1 AP?`, [{ label: 'จ่าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v || !Engine.payAP(p, 1)) return;
+      Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ`);
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && u.rested);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ให้ตั้งขึ้น`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.rested = false; log(`${unit.card.name}: ${t.card.name} ตั้งขึ้น`); }
+    },
+  };
+
+  // 026 Rei Ayanami (Tentative Name) — [When Attacking] place the top card of your deck face-down
+  // under this character. @[Your Turn] +500 BP per face-down card under this character. @at the
+  // start of your turn, if 3+ face-down cards under this character, retire it.
+  reg['UA44BT-EVA-1-026'] = {
+    async onAttack(G, p, unit) { if (p.deck.length) { unit.counters.push(p.deck.shift()); log(`${unit.card.name}: วางการ์ดบนสุดของเด็คคว่ำไว้ใต้ตัวเอง`); } },
+    bpBonus(p, unit) { return isYourTurn(p) ? unit.counters.length * 500 : 0; },
+    async onTurnStart(G, p, unit) { if (unit.counters.length >= 3) await Engine.sidelineUnit(p, unit, 'effect'); },
+  };
+
+  // 046 Misato Katsuragi (2) — [Main][Rest] place 1 Trait:WILLE from hand to Outside Area, if you
+  // did draw 1.
+  reg['UA44BT-EVA-1-046'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      const i = p.hand.findIndex(no => (byNo(no)?.traits || '').includes('WILLE'));
+      if (i < 0) return;
+      unit.rested = true;
+      const no = p.hand.splice(i, 1)[0]; p.sideline.push(no); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
+      log(`${unit.card.name}: ส่ง ${byNo(no)?.name} ไป Outside Area`);
+      Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 056 Mari Makinami Illustrious (2) — [Main][1/turn] only the turn this character was played:
+  // choose 1 Trait:WILLE character, grant "on unblocked attack, draw up to 1" this turn.
+  reg['UA44BT-EVA-1-056'] = {
+    async onMain(G, p, unit) {
+      if (unit.enteredTurn !== Engine.G.turn || unit._usedTurn === Engine.G.turn) return;
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('WILLE'));
+      if (!targets.length) return;
+      unit._usedTurn = Engine.G.turn;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:WILLE`);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t._grantedUnblockedDraw = true; log(`${unit.card.name}: ${t.card.name} ได้รับ "โจมตีไม่ถูกบล็อค จั่ว 1" เทิร์นนี้`); }
+    },
+  };
+
+  // 061 "As you command - Princess!" — choose up to 1 enemy Front Line, -3000 BP; choose up to 1
+  // enemy Front Line, -1000 BP (independent choices, may target the same character).
+  reg['UA44BT-EVA-1-061'] = {
+    async onEvent(G, p, card) { await H.debuffEnemyFront(p, -3000); await H.debuffEnemyFront(p, -1000); },
+  };
+
+  // 070 Rei Ayanami (3) — [On Play] look at the top 3, place up to 1 among them to the Outside
+  // Area, remainder to the top.
+  reg['UA44BT-EVA-1-070'] = { async onPlay(G, p, unit) { await H.lookTopAndDiscard(p, 3, 1, `${unit.card.name}: ดูบนสุด 3 ใบ`); } };
+
+  // 094 "Ayanami! Give me your hand... Come on!!" — gated by a Shinji Ikari or "Unit-01"-named
+  // character on your area: retire 1 enemy Front Line BP<=5000; place up to 1 Rei Ayanami from
+  // your Outside Area face-down under a Shinji Ikari character on your area without one already.
+  reg['UA44BT-EVA-1-094'] = {
+    async onEvent(G, p, card) {
+      if (!hasNamed(p, 'Shinji Ikari') && !hasNamed(p, 'Unit-01')) { p.controller.notify?.('ต้องมี Shinji Ikari หรือ character ชื่อ Unit-01 บนสนาม'); return; }
+      await H.retireEnemyFront(p, 5000);
+      const hosts = [...p.front, ...p.energy].filter(u => (u.card.name || '').includes('Shinji Ikari') && !u.counters.length);
+      if (!hosts.length) return;
+      const i = p.sideline.findIndex(no => (byNo(no)?.name || '').includes('Rei Ayanami'));
+      if (i < 0) return;
+      const uid = await p.controller.chooseOwnCharacter(p, hosts, `${card.name}: เลือก Shinji Ikari ที่จะวาง Rei Ayanami คว่ำไว้ใต้`, true);
+      const host = hosts.find(x => x.uid === uid);
+      if (!host) return;
+      const no = p.sideline.splice(i, 1)[0];
+      host.counters.push(no);
+      log(`${card.name}: วาง ${byNo(no)?.name} คว่ำไว้ใต้ ${host.card.name}`);
+    },
+  };
+
+  // 096 "Dummy Plug System" — choose 1 own character with [Raid] not in Raid State, set it active,
+  // +1000 BP and [Sniper] this turn.
+  reg['UA44BT-EVA-1-096'] = {
+    async onEvent(G, p, card) {
+      const targets = [...p.front, ...p.energy].filter(u => Engine.parseKeywords(u.card).raidTargets.length && !u.under.length);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${card.name}: เลือก character [Raid]`);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      t.rested = false; t.bpMod += 1000; t.tempSnipe = true;
+      log(`${card.name}: ${t.card.name} ตั้งขึ้น, +1000 BP และ [Sniper] เทิร์นนี้`);
+    },
+  };
+
+  // 102 Rei Ayanami (4, ST) — [On Play] look at the top 2, keep any number on top, remainder to
+  // the Outside Area.
+  reg['UA44ST-EVA-1-102'] = { async onPlay(G, p, unit) { await H.lookTopAndDiscard(p, 2, 2, `${unit.card.name}: ดูบนสุด 2 ใบ`); } };
 })();
