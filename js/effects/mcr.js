@@ -383,4 +383,471 @@
       else await H.buffOwnCharacter(p, 1000, { excludeUnit: unit });
     },
   };
+
+  // ---------- 2026-07-25 round: worst-covered-series pass (see CLAUDE.md "engine hook รอบ MCR") ----------
+  function isYourTurn(p) { return Engine.G.players[Engine.G.active] === p; }
+  function hasNamed(p, name) { return [...p.front, ...p.energy].some(u => (u.card.name || '').includes(name)); }
+  async function forceToRemoval(owner, unit, reason) {
+    await Engine.sidelineUnit(owner, unit, reason || 'effect');
+    const idx = owner.sideline.indexOf(unit.no);
+    if (idx >= 0) { owner.sideline.splice(idx, 1); owner.removal.push(unit.no); log(`${unit.card.name} ถูกส่งไป Remove Area แทน Outside Area`); }
+  }
+  function distinctNamedInSideline(p, trait) {
+    return new Set(p.sideline.filter(no => { const c = byNo(no); return c && (c.traits || '').includes(trait); }).map(no => byNo(no).name)).size;
+  }
+
+  // 009 Obelisk — choose 1 of 2: draw 2; OR choose 1 own character +3000 BP. (Skipped: the
+  // "upgrade to choose 2" clause and the face-up-Life/self-remove 3rd bullet.)
+  reg['EX14BT-MCR-2-009'] = {
+    async onEvent(G, p, card) {
+      const v = await p.controller.chooseOption(p, `${card.name}: เลือก effect`, [
+        { label: 'จั่ว 2 ใบ', value: 'a' }, { label: 'character ตัวเอง +3000 BP', value: 'b' },
+      ]);
+      if (v === 'a') { Engine.draw(p, 2); log(`${card.name}: จั่ว 2 ใบ`); }
+      else await H.buffOwnCharacter(p, 3000);
+    },
+  };
+
+  // 010 Houkago Overflow — choose up to 1 own character +2000 BP; if 3+ distinct-named yellow
+  // Trait:Song (Ranka) in your Outside Area, draw 2.
+  reg['EX14BT-MCR-2-010'] = {
+    async onEvent(G, p, card) {
+      await H.buffOwnCharacter(p, 2000);
+      if (distinctNamedInSideline(p, 'Song (Ranka)') >= 3) { Engine.draw(p, 2); log(`${card.name}: จั่ว 2 ใบ`); }
+    },
+  };
+
+  // 011 VF-19EF/A Isamu Special — [On Play][Frontline][1/turn] set active. @[Frontline] at the end
+  // of your Attack Phase, draw 1, place this character at the bottom of your deck, choose up to 1
+  // character without "Isamu" on your Energy Line and move it to the Front Line.
+  reg['EX14BT-MCR-2-011'] = {
+    async onPlay(G, p, unit) {
+      if (!p.front.includes(unit) || unit._usedTurn === Engine.G.turn) return;
+      unit._usedTurn = Engine.G.turn; unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น Active`);
+    },
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.front.includes(unit)) return;
+      const idx = p.front.indexOf(unit);
+      p.front.splice(idx, 1); p.deck.push(unit.no);
+      Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ, ไปล่างสุดของเด็ค`);
+      const targets = p.energy.filter(u => !(u.card.name || '').includes('Isamu'));
+      if (!targets.length || p.front.length >= 4) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ย้ายไป Front Line`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) await Engine.moveUnitFree(p, t, 'front');
+    },
+  };
+
+  // 014 VF-27γSP Super Lucifer (Brera Sterne) — [Main][Frontline][Rest+Retire] gated by Ranka Lee:
+  // retire enemy front BP<=3000; if you used "Sayonara No Tsubasa ~ the end of triangle" this
+  // turn, draw 1.
+  reg['EX14BT-MCR-2-014'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit) || !hasNamed(p, 'Ranka Lee')) { p.controller.notify?.('เงื่อนไขไม่ครบ'); return; }
+      await Engine.sidelineUnit(p, unit, 'effect');
+      await H.retireEnemyFront(p, 3000);
+      if (p._usedSayonaraThisTurn === Engine.G.turn) { Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ`); }
+    },
+  };
+
+  // 018 "Sayonara No Tsubasa ~ the end of triangle" — all enemy Front Line BP>=1500 get -1000 BP,
+  // draw 1. (Cost discount + "1 per turn" limit handled generically / skipped.)
+  reg['EX14BT-MCR-2-018'] = {
+    async onEvent(G, p, card) {
+      p._usedSayonaraThisTurn = Engine.G.turn;
+      const enemy = Engine.opponentOf(p);
+      for (const u of enemy.front) { if (Engine.bp(u) >= 1500 && !u.kw.untargetable && !u.tempUntargetable) u.bpMod -= 1000; }
+      Engine.draw(p, 1); log(`${card.name}: จั่ว 1 ใบ`);
+      await Engine.checkBpZero();
+    },
+  };
+
+  // 019 Heinz Nehrich Windermere — [Main][Rest+Discard1][1/turn] gated by own Trait:Aerial Knights
+  // on Front Line: all enemy Front Line get -1000 BP.
+  reg['EX14BT-MCR-2-019'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      if (!p.front.some(u => (u.card.traits || '').includes('Aerial Knights'))) { p.controller.notify?.('ต้องมี Trait:Aerial Knights บน Front Line'); return; }
+      const discarded = await H.manualDiscardToRemoval(p, `${unit.card.name}: [Discard 1]`);
+      if (!discarded) return;
+      unit._usedTurn = Engine.G.turn;
+      const enemy = Engine.opponentOf(p);
+      for (const u of enemy.front) { if (!u.kw.untargetable && !u.tempUntargetable) u.bpMod -= 1000; }
+      log(`${unit.card.name}: ศัตรูบน Front Line ทั้งหมด -1000 BP เทิร์นนี้`);
+      await Engine.checkBpZero();
+    },
+  };
+
+  // 022 Hayate Immelman — [Main][Frontline][Rest] +1000 BP this turn. @[When Attacking] if BP>=5000
+  // look at top 2, keep any number on top, remainder to Outside Area. (Skipped: the "stand when
+  // you draw with your effects" reactive clause.)
+  reg['EX14BT-MCR-2-022'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit) || unit.rested) { p.controller.notify?.('เงื่อนไขไม่ครบ'); return; }
+      unit.rested = true; unit.bpMod += 1000;
+      log(`${unit.card.name}: +1000 BP เทิร์นนี้`);
+    },
+    async onAttack(G, p, unit) { if (Engine.bp(unit) >= 5000) await H.lookTopAndDiscard(p, 2, 2, `${unit.card.name}: ดูบนสุด 2 ใบ`); },
+  };
+
+  // 035 Freyja Wion — [Main][Rest][1/turn] gated by a "Hayate"-named character on your Front Line:
+  // choose 1 of: (a) draw 1, place 1 from hand to Outside Area; (b) add 1 from Life to hand, if you
+  // did draw 2, place 1 from hand to Outside Area.
+  reg['EX14BT-MCR-2-035'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      if (!p.front.some(u => (u.card.name || '').includes('Hayate'))) { p.controller.notify?.('ต้องมี character ชื่อ Hayate บน Front Line'); return; }
+      unit._usedTurn = Engine.G.turn;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'จั่ว 1 ใบ + ทิ้ง 1 ใบ', value: 'a' }, { label: 'เพิ่มการ์ดจาก Life → จั่ว 2 + ทิ้ง 1 ใบ', value: 'b' },
+      ]);
+      if (v === 'a') { Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ`); await H.discardFromHand(p); }
+      else { const no = await H.addLifeToHand(p); if (no != null) { Engine.draw(p, 2); log(`${unit.card.name}: จั่ว 2 ใบ`); await H.discardFromHand(p); } }
+    },
+  };
+
+  // 043 Mikumo Guynemer (2) — [On Play] if 3+ distinct-named Trait:Walkure on your area, place up
+  // to 1 Trait:Song (Walküre) (need<=2) from your Outside Area on top of your deck.
+  reg['EX14BT-MCR-2-043'] = {
+    async onPlay(G, p, unit) {
+      if (new Set([...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Walkure')).map(u => u.card.name)).size < 3) return;
+      const i = p.sideline.findIndex(no => { const c = byNo(no); return c && (c.traits || '').includes('Song (Walküre)') && (c.need || 0) <= 2; });
+      if (i < 0) return;
+      const no = p.sideline.splice(i, 1)[0];
+      p.deck.unshift(no);
+      log(`${unit.card.name}: วาง ${byNo(no)?.name} บนสุดของเด็ค`);
+    },
+  };
+
+  // 058 "AXIA~Daisuki de Daikirai~" — choose 1 Trait:Delta Flight or Walküre character +2000 BP;
+  // untap 1 AP.
+  reg['EX14BT-MCR-2-058'] = {
+    async onEvent(G, p, card) {
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Delta Flight') || (u.card.traits || '').includes('Walküre'));
+      if (targets.length) {
+        const uid = await p.controller.chooseOwnCharacter(p, targets, `${card.name}: เลือก character`);
+        const t = targets.find(x => x.uid === uid);
+        if (t) { t.bpMod += 2000; log(`${card.name}: ${t.card.name} +2000 BP เทิร์นนี้`); }
+      }
+      await H.apUntap(p, 1);
+    },
+  };
+
+  // 061 "GIRAFFE BLUES" — draw 1; choose 1 of: (a) choose up to 1 enemy Front Line, it cannot
+  // attack until the start of your next turn; (b) choose up to 1 enemy Front Line character in
+  // Raid State, place the top card of its raid stack to the Outside Area.
+  reg['EX14BT-MCR-2-061'] = {
+    async onEvent(G, p, card) {
+      Engine.draw(p, 1); log(`${card.name}: จั่ว 1 ใบ`);
+      const v = await p.controller.chooseOption(p, `${card.name}: เลือก effect`, [
+        { label: 'ศัตรูห้ามโจมตี', value: 'a' }, { label: 'ยกเลิกชั้นบนของ Raid State ศัตรู', value: 'b' },
+      ]);
+      const enemy = Engine.opponentOf(p);
+      if (v === 'a') {
+        const targets = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable);
+        if (!targets.length) return;
+        const uid = await p.controller.chooseEnemyCharacter(p, targets, `${card.name}: เลือก character ศัตรู`, true);
+        const t = targets.find(x => x.uid === uid);
+        if (!t) return;
+        t.tempCannotAttack = true;
+        const dueTurn = Engine.G.turn + 2;
+        Engine.scheduleDelayedAction(dueTurn, () => { t.tempCannotAttack = false; });
+        log(`${card.name}: ${t.card.name} ห้ามโจมตีจนถึงต้นเทิร์นหน้าของคุณ`);
+      } else {
+        const targets = enemy.front.filter(u => u.under.length);
+        if (!targets.length) return;
+        const uid = await p.controller.chooseEnemyCharacter(p, targets, `${card.name}: เลือก character ศัตรูใน Raid State`, true);
+        const t = targets.find(x => x.uid === uid);
+        if (t) await H.unraidTopLayer(enemy, t);
+      }
+    },
+  };
+
+  // 071 "Bird Human" — gated by 2+ own characters with BP 4000+: retire enemy Front Line BP<=5000;
+  // may place 1 Sara Nome from your area to the bottom of your deck, if you did draw 1.
+  reg['EX14BT-MCR-2-071'] = {
+    async onEvent(G, p, card) {
+      if ([...p.front, ...p.energy].filter(u => Engine.bp(u) >= 4000).length < 2) { p.controller.notify?.('ต้องมี character BP 4000+ อย่างน้อย 2 ใบ'); return; }
+      await H.retireEnemyFront(p, 5000);
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.name || '').includes('Sara Nome'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${card.name}: ส่ง Sara Nome ไปล่างสุดของเด็ค? (ไม่บังคับ)`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      for (const line of [p.front, p.energy]) { const i = line.indexOf(t); if (i >= 0) line.splice(i, 1); }
+      p.deck.push(t.no);
+      Engine.draw(p, 1); log(`${card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // UA36BT-MCR-1-028 "Diamond Crevasse" — add 1 Character Card with [Raid] from your Outside Area
+  // to your hand; may rest 1 active Sheryl Nome on your Front Line, if you did untap 1 AP.
+  reg['UA36BT-MCR-1-028'] = {
+    async onEvent(G, p, card) {
+      await H.fetchFromSideline(p, c => c && c.type === 'Character' && Engine.parseKeywords(c).raidTargets.length, `${card.name}: เลือกการ์ด [Raid] จาก Outside Area`);
+      const targets = p.front.filter(u => !u.rested && (u.card.name || '').includes('Sheryl Nome'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${card.name}: วางนอน Sheryl Nome? (ไม่บังคับ)`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      t.rested = true;
+      await H.apUntap(p, 1);
+    },
+  };
+
+  // UA36BT-MCR-1-030 "Aimo" — gated by Ranka Lee on your Front Line: choose 1 of: (a) rest 1 enemy
+  // Front Line character, it doesn't stand next time; (b) look top 5, add up to 2 Character Cards
+  // to hand, remainder to bottom.
+  reg['UA36BT-MCR-1-030'] = {
+    async onEvent(G, p, card) {
+      if (!p.front.some(u => (u.card.name || '').includes('Ranka Lee'))) { p.controller.notify?.('ต้องมี Ranka Lee บน Front Line'); return; }
+      const v = await p.controller.chooseOption(p, `${card.name}: เลือก effect`, [
+        { label: 'วางนอนศัตรู (ไม่ลุกครั้งถัดไป)', value: 'a' }, { label: 'ดูบนสุด 5 ใบ หา Character', value: 'b' },
+      ]);
+      if (v === 'a') {
+        const enemy = Engine.opponentOf(p);
+        const targets = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable);
+        if (!targets.length) return;
+        const uid = await p.controller.chooseEnemyCharacter(p, targets, `${card.name}: เลือก character ศัตรู`);
+        const t = targets.find(x => x.uid === uid);
+        if (t) { t.rested = true; t.skipNextStand = true; log(`${card.name}: ${t.card.name} ถูกวางนอน (ไม่ลุกครั้งถัดไป)`); }
+      } else {
+        await H.lookTopAndTake(p, 5, c => c.type === 'Character', 2, `${card.name}: ดูบนสุด 5 ใบ`);
+      }
+    },
+  };
+
+  // UA36BT-MCR-1-031 "Interstellar Flight" — rest 1 enemy Front Line BP<=5000, doesn't stand next
+  // time; if a Ranka Lee is on your area, may retire it instead.
+  reg['UA36BT-MCR-1-031'] = {
+    async onEvent(G, p, card) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable && Engine.bp(u) <= 5000);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, targets, `${card.name}: เลือก character ศัตรู`);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      if (hasNamed(p, 'Ranka Lee')) {
+        const v = await p.controller.chooseOption(p, `${card.name}: Retire แทนได้`, [{ label: 'Retire', value: true }, { label: 'วางนอนแทน', value: false }]);
+        if (v) { await Engine.sidelineUnit(enemy, t, 'effect'); return; }
+      }
+      t.rested = true; t.skipNextStand = true;
+      log(`${card.name}: ${t.card.name} ถูกวางนอน (ไม่ลุกครั้งถัดไป)`);
+    },
+  };
+
+  // UA36BT-MCR-1-032 "My Boyfriend Is A Pilot" — choose up to 1 own character +1000 BP; draw 1; if
+  // 3+ distinct-named Trait:Song (Ranka) in your Outside Area, untap 1 AP.
+  reg['UA36BT-MCR-1-032'] = {
+    async onEvent(G, p, card) {
+      await H.buffOwnCharacter(p, 1000);
+      Engine.draw(p, 1); log(`${card.name}: จั่ว 1 ใบ`);
+      if (distinctNamedInSideline(p, 'Song (Ranka)') >= 3) await H.apUntap(p, 1);
+    },
+  };
+
+  // UA36BT-MCR-1-035 Guld Goa Bowman — [On Play] if there is an "Isamu"-named character on your
+  // area, look at the top 2, keep any number on top, remainder to the bottom.
+  reg['UA36BT-MCR-1-035'] = {
+    async onPlay(G, p, unit) {
+      if (!hasNamed(p, 'Isamu')) return;
+      const n = Math.min(2, p.deck.length);
+      if (!n) return;
+      const revealed = p.deck.splice(0, n);
+      const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: ดูบนสุด 2 ใบ`, null, n);
+      const toBottom = [];
+      picked.sort((a, b) => b - a).forEach(i => { toBottom.push(revealed.splice(i, 1)[0]); });
+      p.deck.unshift(...revealed);
+      p.deck.push(...toBottom);
+      log(`${unit.card.name}: จัดเรียงการ์ดบนสุด ${n} ใบ`);
+    },
+  };
+
+  // UA36BT-MCR-1-036 Guld Goa Bowman (2) — [When in Energy Line] if there is an "Isamu"-named
+  // character on your Front Line, +1 generated energy.
+  reg['UA36BT-MCR-1-036'] = { genMod(unit, p) { return (p.energy.includes(unit) && p.front.some(u => (u.card.name || '').includes('Isamu'))) ? 1 : 0; } };
+
+  // UA36BT-MCR-1-040 Isamu Dyson — [On Play] if there is a "Guld"-named character on your area,
+  // choose up to 1 enemy Front Line BP>=1500, -1000 BP.
+  reg['UA36BT-MCR-1-040'] = {
+    async onPlay(G, p, unit) {
+      if (!hasNamed(p, 'Guld')) return;
+      await H.debuffEnemyFront(p, -1000, {});
+    },
+  };
+
+  // UA36BT-MCR-1-049 "Dogfight" — gated by an "Isamu"- or "Guld"-named character on your area:
+  // retire enemy Front Line BP<=5000; if both an Isamu-named and a Guld-named character are on
+  // your area, may pay 1 AP, if you did fetch an Isamu/Guld Character Card from your Outside Area
+  // to your hand.
+  reg['UA36BT-MCR-1-049'] = {
+    async onEvent(G, p, card) {
+      if (!hasNamed(p, 'Isamu') && !hasNamed(p, 'Guld')) { p.controller.notify?.('ต้องมี character ชื่อ Isamu หรือ Guld บนสนาม'); return; }
+      await H.retireEnemyFront(p, 5000);
+      if (!hasNamed(p, 'Isamu') || !hasNamed(p, 'Guld')) return;
+      const v = await p.controller.chooseOption(p, `${card.name}: จ่าย 1 AP เพื่อดึงการ์ด?`, [{ label: 'จ่าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v || !Engine.payAP(p, 1)) return;
+      await H.fetchFromSideline(p, c => c && c.type === 'Character' && ((c.name || '').includes('Isamu') || (c.name || '').includes('Guld')), `${card.name}: เลือกการ์ดจาก Outside Area`);
+    },
+  };
+
+  // UA36BT-MCR-1-051 Sheryl Nome (2) — [Main][Rest][1/turn] choose 1 of: (a) choose up to 1
+  // "Alto"-named Front Line character, +1000 BP; (b) grant it "on unblocked attack, draw up to 1"
+  // this turn. (Skipped: the "cannot repeat the same effect as other Sheryl Nome cards this turn"
+  // exclusivity clause.)
+  reg['UA36BT-MCR-1-051'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      const targets = p.front.filter(u => (u.card.name || '').includes('Alto'));
+      if (!targets.length) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: '+1000 BP', value: 'a' }, { label: 'โจมตีไม่ถูกบล็อค → จั่ว 1', value: 'b' },
+      ]);
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ชื่อ Alto`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      if (v === 'a') { t.bpMod += 1000; log(`${unit.card.name}: ${t.card.name} +1000 BP เทิร์นนี้`); }
+      else { t._grantedUnblockedDraw = true; log(`${unit.card.name}: ${t.card.name} ได้รับ "โจมตีไม่ถูกบล็อค จั่ว 1" เทิร์นนี้`); }
+    },
+  };
+
+  // UA36BT-MCR-1-052 Ranka Lee — [Main][Rest][1/turn] choose 1 of: (a) if an "Alto"-named
+  // character is on your Front Line, choose up to 1 enemy BP>=1500, -1000 BP; (b) grant an
+  // "Alto"-named Front Line character "on win battle, draw up to 1" this turn. (Skipped: the
+  // "cannot repeat the same effect" exclusivity clause.)
+  reg['UA36BT-MCR-1-052'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'ศัตรู -1000 BP (ต้องมี Alto บน Front Line)', value: 'a' }, { label: 'ชนะ battle → จั่ว 1 (Alto บน Front Line)', value: 'b' },
+      ]);
+      if (v === 'a') {
+        if (!p.front.some(u => (u.card.name || '').includes('Alto'))) { p.controller.notify?.('ต้องมี Alto บน Front Line'); return; }
+        await H.debuffEnemyAny(p, -1000, { min: 1500 });
+      } else {
+        const targets = p.front.filter(u => (u.card.name || '').includes('Alto'));
+        if (!targets.length) return;
+        const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ชื่อ Alto`);
+        const t = targets.find(x => x.uid === uid);
+        if (t) { t._grantedOnWinDraw = true; log(`${unit.card.name}: ${t.card.name} ได้รับ "ชนะ battle จั่ว 1" เทิร์นนี้`); }
+      }
+    },
+  };
+
+  // UA36BT-MCR-1-068 Hikaru Ichijyo — [On Play] may pay 1 AP, if you did add up to 1 Lynn Minmay
+  // or Misa Hayase from your Outside Area to your hand. @[Main][1/turn] if this character's BP is
+  // 5000+, set this character to active.
+  reg['UA36BT-MCR-1-068'] = {
+    async onPlay(G, p, unit) {
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: จ่าย 1 AP เพื่อดึงการ์ด?`, [{ label: 'จ่าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v || !Engine.payAP(p, 1)) return;
+      await H.fetchFromSideline(p, c => c && ((c.name || '').includes('Lynn Minmay') || (c.name || '').includes('Misa Hayase')), `${unit.card.name}: เลือกการ์ดจาก Outside Area`);
+    },
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      if (Engine.bp(unit) < 5000) { p.controller.notify?.('BP ต้อง 5000 ขึ้นไป'); return; }
+      unit._usedTurn = Engine.G.turn; unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น Active`);
+    },
+  };
+
+  // UA36BT-MCR-1-074 Exsedol Folmo — [On Play] gated by a "Maximilian Jenius"-named character on
+  // your area: choose 1 of: (a) look top 2, keep any number on top, remainder to Outside Area; (b)
+  // choose up to 1 other own character, +1000 BP.
+  reg['UA36BT-MCR-1-074'] = {
+    async onPlay(G, p, unit) {
+      if (!hasNamed(p, 'Maximilian Jenius')) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'ดูบนสุด 2 ใบ', value: 'a' }, { label: 'character อื่น +1000 BP', value: 'b' },
+      ]);
+      if (v === 'a') await H.lookTopAndDiscard(p, 2, 2, `${unit.card.name}: ดูบนสุด 2 ใบ`);
+      else await H.buffOwnCharacter(p, 1000, { excludeUnit: unit });
+    },
+  };
+
+  // UA36BT-MCR-1-094 Gigile — [Your Turn] if a "Basara"-named character is in the same line as
+  // this character, +1000 BP. (Skipped: the replacement-effect "retire this instead of Sivil"
+  // clause.)
+  reg['UA36BT-MCR-1-094'] = {
+    bpBonus(p, unit) {
+      if (!isYourTurn(p)) return 0;
+      const line = p.front.includes(unit) ? p.front : p.energy;
+      return line.some(u => u !== unit && (u.card.name || '').includes('Basara')) ? 1000 : 0;
+    },
+  };
+
+  // UA36BT-MCR-1-099 "Totsugeki Love Heart" — choose 1 enemy Front Line BP<=5000, place it on top
+  // or bottom of your opponent's deck, by your opponent's choice; if a "Basara"-named character is
+  // on your area, by your choice instead.
+  reg['UA36BT-MCR-1-099'] = {
+    async onEvent(G, p, card) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable && Engine.bp(u) <= 5000);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, targets, `${card.name}: เลือก character ศัตรู`);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      for (const line of [enemy.front, enemy.energy]) { const i = line.indexOf(t); if (i >= 0) line.splice(i, 1); }
+      const chooser = hasNamed(p, 'Basara') ? p : enemy;
+      const dest = await chooser.controller.chooseOption(chooser, `${t.card.name}: บนสุดหรือล่างสุดของเด็คเจ้าของ?`, [{ label: 'บนสุด', value: 'top' }, { label: 'ล่างสุด', value: 'bottom' }]);
+      if (dest === 'top') enemy.deck.unshift(t.no); else enemy.deck.push(t.no);
+      log(`${card.name}: ${t.card.name} ไป${dest === 'top' ? 'บนสุด' : 'ล่างสุด'}ของเด็คเจ้าของ`);
+    },
+  };
+
+  // UA36BT-MCR-1-100 "TRY AGAIN" — draw 2; choose up to 1 "Basara"-named own Front Line, set
+  // active and [Impact +1]; choose up to 1 Sivil on your Front Line, set active.
+  reg['UA36BT-MCR-1-100'] = {
+    async onEvent(G, p, card) {
+      Engine.draw(p, 2); log(`${card.name}: จั่ว 2 ใบ`);
+      const basaras = p.front.filter(u => (u.card.name || '').includes('Basara'));
+      if (basaras.length) {
+        const uid = await p.controller.chooseOwnCharacter(p, basaras, `${card.name}: เลือก character ชื่อ Basara`, true);
+        const t = basaras.find(x => x.uid === uid);
+        if (t) { t.rested = false; t.tempImpact = (t.tempImpact || 0) + 1; log(`${card.name}: ${t.card.name} ตั้งขึ้น + [Impact +1]`); }
+      }
+      const sivils = p.front.filter(u => (u.card.name || '').includes('Sivil'));
+      if (sivils.length) {
+        const uid = await p.controller.chooseOwnCharacter(p, sivils, `${card.name}: เลือก Sivil`, true);
+        const t = sivils.find(x => x.uid === uid);
+        if (t) { t.rested = false; log(`${card.name}: ${t.card.name} ตั้งขึ้น`); }
+      }
+    },
+  };
+
+  // UA36ST-MCR-1-109 "Sniper Rifle" (Field) — [On Play] if there is a "Michael"-named character on
+  // your area, set this Field to active. @[Main][Rest+Retire] choose up to 1 Trait:S.M.S
+  // character, [Impact +1]. (Skipped: the "[When in Outside Area] reactive to a Michael-named
+  // character retiring" clause — recurring "activate from Outside Area" gap.)
+  reg['UA36ST-MCR-1-109'] = {
+    async onPlay(G, p, unit) { if (hasNamed(p, 'Michael')) { unit.rested = false; log(`${unit.card.name}: ตั้งขึ้น Active`); } },
+    async onMain(G, p, unit) {
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('S.M.S'));
+      await Engine.sidelineUnit(p, unit, 'effect');
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:S.M.S`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.tempImpact = (t.tempImpact || 0) + 1; log(`${unit.card.name}: ${t.card.name} [Impact +1] เทิร์นนี้`); }
+    },
+  };
+
+  // UA36ST-MCR-1-110 Sheryl Nome (3) — [Main][Rest][1/turn] rest 1 active own Front Line
+  // character, if you did +1 generated energy this turn.
+  reg['UA36ST-MCR-1-110'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested || unit._usedTurn === Engine.G.turn) return;
+      const targets = p.front.filter(u => u !== unit && !u.rested);
+      if (!targets.length) return;
+      unit.rested = true; unit._usedTurn = Engine.G.turn;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ให้วางนอน`);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      t.rested = true;
+      unit.tempGen += 1;
+      log(`${unit.card.name}: ${t.card.name} ถูกวางนอน, +1 energy generation เทิร์นนี้`);
+    },
+  };
 })();
