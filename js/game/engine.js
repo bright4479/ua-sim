@@ -1239,7 +1239,7 @@ const Engine = (() => {
     raidTargetsFor, opponentOf, findUnit, hasTextCostDiscount,
     // API for the effects layer
     draw, log, payAP, sidelineUnit, returnUnitToHand, moveUnitFree, playCardFromZone, checkBpZero, update,
-    scheduleDelayedAction, payApForEffect, dealDamage,
+    scheduleDelayedAction, payApForEffect, dealDamage, resolveTrigger,
   };
 })();
 

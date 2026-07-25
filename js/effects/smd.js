@@ -280,4 +280,22 @@
       log(`${card.name}: ${enemy.name} ไม่สามารถย้าย character จาก Energy Line ไป Front Line ได้ในเทิร์นถัดไป`);
     },
   };
+
+  // 050 Taro Sakamoto — [On Play] may place 1 card from hand to the Outside Area; if you did,
+  // choose up to 1 character not in Raid State on your Front Line and activate its Trigger effect.
+  // (Skipped: [Get]/[Raid] trigger types — activating those would incorrectly duplicate the target
+  // card, since resolveTrigger assumes the card is being consumed from Life, not staying on field.)
+  reg['UA43BT-SMD-1-050'] = {
+    async onPlay(G, p, unit) {
+      const no = await H.discardFromHand(p, `${unit.card.name}: ส่งการ์ดจากมือไป Outside Area? (ไม่บังคับ)`);
+      if (no == null) return;
+      const targets = p.front.filter(u => u.card.type === 'Character' && !u.under.length);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character เพื่อ activate Trigger`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (!t || !t.card.trigger) return;
+      if (t.card.trigger === 'Get' || t.card.trigger === 'Raid') { log(`${unit.card.name}: Trigger ประเภทนี้ยังไม่รองรับกับ mechanic นี้`); return; }
+      await Engine.resolveTrigger(p, t.card);
+    },
+  };
 })();
