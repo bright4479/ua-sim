@@ -82,6 +82,10 @@ const Engine = (() => {
     if (/cannot be blocked by characters? in raided state/i.test(fx)) kw.unblockableByRaided = true;
     // "This card cannot be played to the Front Line." (permanent zone restriction — hand-play only)
     if (/This card cannot be played to (?:the )?Front Line\.?/i.test(fx)) kw.cannotEnterFront = true;
+    // "This card can only be played on ... the Front Line using your effects." — implies normal
+    // hand-play to the Front Line is blocked (playCardFromZone, used by "play by your effect"
+    // cards, bypasses this check entirely, so the restriction still holds correctly for those).
+    if (/can only be played on(?:\s*or\s*moved to)? (?:the )?Front Line using your effects/i.test(fx)) kw.cannotEnterFront = true;
     // "This card cannot be played on the Energy Line." (permanent zone restriction — front-only)
     if (/This card cannot be played on (?:the )?Energy Line\.?/i.test(fx)) kw.cannotEnterEnergy = true;
     // "... and cannot be moved to the Front Line." (permanent — narrower than cannotMove)
