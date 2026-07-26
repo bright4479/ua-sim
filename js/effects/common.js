@@ -413,6 +413,21 @@
     if (!/this (?:character|card) (?:gains?|gets)\s*["“]/i.test(fx)) return null;
     return parseUnblockableGrant(fx);
   }
+  // "If this character's BP is 6000 or more, this character gains "...cannot be blocked..."." —
+  // a self-grant gated on a live property of the card, so it is re-evaluated when it matters
+  // (on attack) rather than baked in as a static keyword.
+  function matchCondSelfUnblockableGrant(fx) {
+    if (!/this (?:character|card) (?:gains?|gets)\s*["“]/i.test(fx)) return null;
+    const g = parseUnblockableGrant(fx);
+    if (!g) return null;
+    let m;
+    if ((m = fx.match(/If this character'?s BP is (\d+) or (?:more|higher)/i)))
+      return { ...g, cond: u => Engine.bp(u) >= parseInt(m[1]) };
+    if ((m = fx.match(/If this character'?s required energy is (\d+) or (?:more|higher)/i)))
+      return { ...g, cond: u => (u.card.need || 0) >= parseInt(m[1]) };
+    return null;
+  }
+
   // "... Choose up to 1 <criteria> character on your area, it gains "...cannot be blocked..."" —
   // the grant lands on a chosen character.
   function matchChosenUnblockableGrant(fx) {
@@ -645,6 +660,11 @@
   Effects.onAttack = async function (G, p, unit) {
     if (unit.effectsNullified) return;
     if (this.registry[unit.no]?.onAttack) return origOnAttack(G, p, unit);
+    // Passive conditional self-grants ("If this character's BP is N or more, this character gains
+    // "...cannot be blocked...".") carry no [When Attacking] marker, so they are evaluated here —
+    // attacking is the only moment an unblockable clause has any effect.
+    const cg = findSeg(unit.card.effect, matchCondSelfUnblockableGrant);
+    if (cg && cg.cond(unit)) applyUnblockableGrant(unit, cg);
     const fx = findClause(unit.card.effect, /^\[When Attacking\]/i);
     if (!fx) return;
     let m;
@@ -713,6 +733,17 @@
       await restEnemyFront(p);
     } else if ((m = matchBounceEnemy(fx))) {
       await bounceEnemyFront(p, m);
+    } else if ((rc = findSeg(card.effect, matchChosenUnblockableGrant))) {
+      // "Draw 1 card. Choose up to 1 <X> on your area, it gets "...cannot be blocked..."" — any
+      // draw in the same clause is handled by the draw branch below when it matches on its own.
+      const dn = (card.effect || '').match(/Draw (\d+) cards?/i);
+      if (dn) { draw(p, parseInt(dn[1])); log(`${card.name}: จั่ว ${dn[1]} ใบ`); }
+      const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character');
+      if (units.length) {
+        const uid = await p.controller.chooseOwnCharacter(p, units, 'เลือก character รับความสามารถ "ไม่ถูกบล็อก"', true);
+        const t = units.find(x => x.uid === uid);
+        if (t) applyUnblockableGrant(t, rc);
+      }
     } else if ((dd = findSeg(card.effect, matchDrawDiscard))) {
       draw(p, dd.drawN);
       log(`${card.name}: จั่ว ${dd.drawN} ใบ`);
