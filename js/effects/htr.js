@@ -1128,7 +1128,58 @@
   // Skipped (too narrow/architecturally risky for the current hook system):
   //  • 2-024 Hisoka — reactive "opponent must discard when targeting my named units" punishment
   //  • 2-026 White Goreinu — substitute-retire-for-another-unit reactive replacement
-  //  • 2-046 Out-!! — rewrites another specific card's own [Main] target selection
-  //  • 2-068 Zushi — "when this gets a BP increase, gain more BP" (self-referential loop risk)
   // ────────────────────────────────────────────────────────────────────────
+
+  // ---------- 2026-07-25 round: worst-covered-series pass ----------
+  // 1-027 Risky Dice (Field) — [Main][Rest] choose 1 character, reveal the top card of your deck.
+  // need>=2: add it to hand and the chosen character gets +1000 BP this turn. need<=1: retire the
+  // chosen character and put the revealed card back on top.
+  // "Out-!!" (2-046) may redirect this turn's target selection to an OPPONENT'S Front Line
+  // character instead — tracked via `p._riskyDiceTargetsEnemyTurn`.
+  reg['HTR-1-027'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      if (!p.deck.length) { p.controller.notify?.('เด็คหมด'); return; }
+      const enemy = Engine.opponentOf(p);
+      const redirected = p._riskyDiceTargetsEnemyTurn === Engine.G.turn;
+      const pool = redirected
+        ? enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable)
+        : [...p.front, ...p.energy].filter(u => u.card.type === 'Character');
+      if (!pool.length) { p.controller.notify?.('ไม่มีเป้าหมาย'); return; }
+      unit.rested = true;
+      const uid = redirected
+        ? await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรู (จากผล Out-!!)`)
+        : await p.controller.chooseOwnCharacter(p, pool, `${unit.card.name}: เลือก character`);
+      const t = pool.find(x => x.uid === uid);
+      if (!t) return;
+      const revealed = byNo(p.deck[0]);
+      log(`${unit.card.name}: เปิดการ์ดบนสุด — ${revealed?.name} (Energy ${revealed?.need ?? '-'})`);
+      if ((revealed?.need || 0) >= 2) {
+        p.hand.push(p.deck.shift());
+        t.bpMod += 1000;
+        log(`${unit.card.name}: เพิ่ม ${revealed?.name} เข้ามือ, ${t.card.name} +1000 BP เทิร์นนี้`);
+      } else {
+        await Engine.sidelineUnit(redirected ? enemy : p, t, 'effect');
+        log(`${unit.card.name}: ${t.card.name} ถูก retire (การ์ดที่เปิดอยู่บนเด็คเหมือนเดิม)`);
+      }
+    },
+  };
+
+  // 2-046 "Out-!!" — during this turn, the next Risky Dice [Main] may choose an opponent's Front
+  // Line character instead of one of yours.
+  reg['HTR-2-046'] = {
+    async onEvent(G, p, card) {
+      p._riskyDiceTargetsEnemyTurn = Engine.G.turn;
+      log(`${card.name}: Risky Dice [Main] เทิร์นนี้เลือก character ฝ่ายตรงข้ามได้`);
+    },
+  };
+
+  // 2-068 Zushi — [Your Turn][1 Per Turn] when this character's BP is increased, +1000 BP this
+  // turn. Evaluated live off the raw `bpMod` field (never Engine.bp(), which would recurse through
+  // this very hook), so it reads any buff already applied this turn without a reactive hook.
+  reg['HTR-2-068'] = {
+    bpBonus(p, unit) {
+      return (Engine.G.players[Engine.G.active] === p && (unit.bpMod || 0) > 0) ? 1000 : 0;
+    },
+  };
 })();
