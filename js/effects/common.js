@@ -425,6 +425,8 @@
       return { ...g, cond: u => Engine.bp(u) >= parseInt(m[1]) };
     if ((m = fx.match(/If this character'?s required energy is (\d+) or (?:more|higher)/i)))
       return { ...g, cond: u => (u.card.need || 0) >= parseInt(m[1]) };
+    if (/If you used an Event Card during this turn/i.test(fx))
+      return { ...g, cond: (u, p) => (p._eventsUsedThisTurn || 0) > 0 };
     return null;
   }
 
@@ -664,7 +666,7 @@
     // "...cannot be blocked...".") carry no [When Attacking] marker, so they are evaluated here —
     // attacking is the only moment an unblockable clause has any effect.
     const cg = findSeg(unit.card.effect, matchCondSelfUnblockableGrant);
-    if (cg && cg.cond(unit)) applyUnblockableGrant(unit, cg);
+    if (cg && cg.cond(unit, p)) applyUnblockableGrant(unit, cg);
     const fx = findClause(unit.card.effect, /^\[When Attacking\]/i);
     if (!fx) return;
     let m;
