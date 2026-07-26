@@ -386,4 +386,39 @@
       if (sIdx >= 0) { p.sideline.splice(sIdx, 1); p.hand.push(unit.no); log(`${unit.card.name}: กลับเข้ามือ (ไม่ได้ลงการ์ดใด)`); }
     },
   };
+
+  // ---------- 2026-07-25 round: worst-covered-series pass ----------
+  // GNT-1-003 Sasaki Isaburo — [When in Energy Line] when a character on your area is returned to
+  // your hand, may move this character to the Front Line. (Approximated via onAnyLeaveField, which
+  // fires for both retire and return-to-hand.)
+  reg['GNT-1-003'] = {
+    async onAnyLeaveField(G, p, leftUnit, selfUnit) {
+      if (!p.energy.includes(selfUnit) || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${selfUnit.card.name}: ย้ายไป Front Line?`, [{ label: 'ย้าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await Engine.moveUnitFree(p, selfUnit, 'front');
+    },
+  };
+
+  // GNT-1-043 Okada Nizou — [When in Frontline] at the end of your Attack Phase, if 6+ total
+  // Trait:Kiheitai or Trait:Space Pirates Harusame cards in your Outside Area, choose 1 of: place
+  // this card to the Outside Area; or place 1 Trait:Kiheitai/Trait:Space Pirates Harusame from your
+  // hand to the Outside Area.
+  reg['GNT-1-043'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.front.includes(unit)) return;
+      const count = p.sideline.filter(no => { const c = byNo(no); return c && ((c.traits || '').includes('Kiheitai') || (c.traits || '').includes('Space Pirates Harusame')); }).length;
+      if (count < 6) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'ส่งตัวเองไป Outside Area', value: 'a' }, { label: 'ทิ้งการ์ด Kiheitai/Space Pirates Harusame จากมือ', value: 'b' },
+      ]);
+      if (v === 'a') {
+        await Engine.sidelineUnit(p, unit, 'effect');
+      } else {
+        const i = p.hand.findIndex(no => { const c = byNo(no); return c && ((c.traits || '').includes('Kiheitai') || (c.traits || '').includes('Space Pirates Harusame')); });
+        if (i < 0) return;
+        const no = p.hand.splice(i, 1)[0]; p.sideline.push(no); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
+        log(`${unit.card.name}: ส่ง ${byNo(no)?.name} ไป Outside Area`);
+      }
+    },
+  };
 })();

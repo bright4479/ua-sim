@@ -93,7 +93,9 @@ const Engine = (() => {
     // "You can raid this character with your character cards without the required Raided card." (permanent)
     if (/can raid this character with your character cards without the required Raided card/i.test(fx)) kw.raidableByAny = true;
     // "Your Character Cards with [Raid] can use this card to raid." (same concept, reversed subject)
-    if (/Character Cards with \[Raid\] can (?:use|raid) this (?:card|character)(?: to raid)?/i.test(fx)) kw.raidableByAny = true;
+    // — also matches "<Trait: X> cards with Raid can use this card to raid" (no brackets around
+    // Raid, and a trait reference instead of the literal words "Character Cards").
+    if (/(?:Character Cards|<[^>]+>\s*cards) with \[?Raid\]? can (?:use|raid) this (?:card|character)(?: to raid)?/i.test(fx)) kw.raidableByAny = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
