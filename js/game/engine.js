@@ -10,7 +10,9 @@ const Engine = (() => {
     const fx = (c.effect || '');
     const kw = {
       step: /\[Step\]/i.test(fx),
-      snipe: /\[Snipe\]/i.test(fx),
+      // the source data spells this keyword "[Sniper]" on 113 cards and "[Snipe]" on only 4 —
+      // matching just the latter silently disabled the keyword on almost every card that has it.
+      snipe: /\[Sniper?\]/i.test(fx),
       doubleAttack: /\[Double Attack\]/i.test(fx),
       doubleBlock: /\[Double Block\]/i.test(fx),
       nullifyImpact: /\[(Nullify Impact|Impact Negate|Impact Nagate)\]/i.test(fx), // "Nagate" is a recurring data-entry typo of "Negate"
@@ -33,6 +35,8 @@ const Engine = (() => {
       cannotMoveToFront: false,   // "This card cannot be moved to the Front Line." (permanent — narrower than cannotMove: can still move TO the Energy Line via Step etc.)
       raidableByAny: false,       // "You can raid this character with your character cards without the required Raided card." (permanent — any raider qualifies, like tempRaidable but printed/static)
       retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
+      immuneBpReduction: false,   // "This character is not affected by BP reducing effects." (clamped inside bp(), so it covers every debuff source at once)
+      snipeMaxBP: null,           // "[Snipe] cannot target characters with BP N or more." — upper bound on this unit's snipe targets
     };
     const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -98,6 +102,12 @@ const Engine = (() => {
     if (/(?:Character Cards|<[^>]+>\s*cards) with \[?Raid\]? can (?:use|raid) this (?:card|character)(?: to raid)?/i.test(fx)) kw.raidableByAny = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
+    // "This character is not affected by BP reducing effects." (permanent)
+    if (/not affected by BP[- ]?reduc\w*/i.test(fx)) kw.immuneBpReduction = true;
+    // "This character [Snipe] cannot target characters with BP2000 or more." — caps which units
+    // this one may snipe (distinct from the unblockable-BP keywords, which cap its blockers).
+    const snipeCap = fx.match(/\[Sniper?\][^.]*cannot target characters? with BP\s*(\d+) or more/i);
+    if (snipeCap) kw.snipeMaxBP = parseInt(snipeCap[1]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
     for (const t of treated) kw.alsoTreatedAs.push(t[1].trim());
@@ -199,7 +209,12 @@ const Engine = (() => {
       const ah = Effects.registry[u2.no]?.auraBp;
       if (ah) aura += ah(owner, u2, unit) || 0;
     }
-    return Math.max(0, (unit.card.bp || 0) + unit.bpMod + unit.bpPersist + bonus + aura);
+    // "This character is not affected by BP reducing effects." — clamped here at the single point
+    // where BP is computed rather than at every debuff site (dozens of per-card scripts write
+    // `bpMod -= N` directly), so any negative modifier from any source is simply ignored.
+    const mod = unit.kw.immuneBpReduction ? Math.max(0, unit.bpMod) : unit.bpMod;
+    const persist = unit.kw.immuneBpReduction ? Math.max(0, unit.bpPersist) : unit.bpPersist;
+    return Math.max(0, (unit.card.bp || 0) + mod + persist + bonus + aura);
   }
 
   function findOwnerIdx(unit) {
@@ -784,6 +799,12 @@ const Engine = (() => {
       let targetUnit = null;
       if (decl.targetUid != null && (atk.kw.snipe || atk.tempSnipe)) {
         targetUnit = enemy.front.find(u => u.uid === decl.targetUid) || null;
+        // "[Snipe] cannot target characters with BP N or more" — the pick is simply rejected and
+        // the attack proceeds as a normal (non-sniping) one.
+        if (targetUnit && atk.kw.snipeMaxBP != null && bp(targetUnit) >= atk.kw.snipeMaxBP) {
+          log(`${atk.card.name}: [Snipe] เลือก ${targetUnit.card.name} ไม่ได้ (BP ${atk.kw.snipeMaxBP} ขึ้นไป)`);
+          targetUnit = null;
+        }
       }
       log(`${p.name}: ${atk.card.name} โจมตี ${targetUnit ? targetUnit.card.name : enemy.name}`);
       await Effects.onAttack(G, p, atk);

@@ -59,7 +59,7 @@ function hasKeywordOnly(c) {
   const kw = Engine.parseKeywords(c);
   return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||
     kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.unblockableBPMin != null || kw.alsoTreatedAs.length ||
-    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || PASSIVE_TEXT_RE.test(c.effect || '') || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
+    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || kw.immuneBpReduction || kw.snipeMaxBP != null || PASSIVE_TEXT_RE.test(c.effect || '') || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
 }
 
 // strip every sentence/tag pattern our keyword-only fallback already recognizes as "handled", to
