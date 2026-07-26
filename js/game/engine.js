@@ -1260,7 +1260,7 @@ const Engine = (() => {
     }
   }
 
-  function scheduleDelayedAction(turn, fn) { G._delayedActions.push({ turn, fn }); }
+  function scheduleDelayedAction(turn, fn) { (G._delayedActions ||= []).push({ turn, fn }); }
 
   // for "[Pay N AP]" ability costs specifically (as opposed to a card's normal hand-play AP cost) —
   // tracks p._paidApByEffectThisTurn for "if you have paid an AP by your character's effect during

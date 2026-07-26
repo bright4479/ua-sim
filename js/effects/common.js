@@ -407,6 +407,72 @@
     if (g.dir === 'max') u.tempUnblockableBP = g.bp; else u.tempUnblockableBPMin = g.bp;
     log(`${u.card.name}: ไม่ถูกบล็อกโดย character BP ${g.bp} ${g.dir === 'max' ? 'หรือน้อยกว่า' : 'ขึ้นไป'} เทิร์นนี้`);
   }
+
+  // The same quoted-grant idea, generalized past "cannot be blocked": a quoted ability is handed
+  // to a unit for the turn, so it maps onto whichever temp field already models that ability.
+  // Anything not listed here (notably "must block this character's attack", which the engine has
+  // no way to enforce) returns null and falls through to manual handling.
+  const GRANTED_ABILITIES = [
+    [/\[Sniper?\]/i,                                    'ได้ [Sniper]',        u => { u.tempSnipe = true; }],
+    [/\[Impact[^\]]*\]/i,                               'ได้ [Impact +1]',      u => { u.tempImpact = (u.tempImpact || 0) + 1; }],
+    [/\[Damage[^\]]*\]/i,                               'ได้ [Damage +1]',      u => { u.tempDmg = (u.tempDmg || 0) + 1; }],
+    // the three tempCannot* fields have no End Phase reset (they are cleared by an explicit
+    // scheduled action), so each one pairs its setter with the matching clear — see resolveAbilityGrant
+    [/cannot attack or block/i,                          'ห้ามโจมตีและบล็อก',    u => { u.tempCannotAttack = true; u.tempCannotBlock = true; }, u => { u.tempCannotAttack = false; u.tempCannotBlock = false; }],
+    [/cannot attack/i,                                   'ห้ามโจมตี',            u => { u.tempCannotAttack = true; }, u => { u.tempCannotAttack = false; }],
+    [/cannot block/i,                                    'ห้ามบล็อก',            u => { u.tempCannotBlock = true; }, u => { u.tempCannotBlock = false; }],
+    [/cannot move/i,                                     'ห้ามเคลื่อนที่',        u => { u.tempCannotMove = true; }, u => { u.tempCannotMove = false; }],
+    [/cannot be chosen/i,                                'ไม่ถูกเลือกเป็นเป้าหมาย', u => { u.tempUntargetable = true; }],
+    [/attacks? and is not blocked[^"]*draw/i,            'โจมตีไม่ถูกบล็อก → จั่ว', u => { u._grantedUnblockedDraw = true; }],
+    [/wins? a battle[^"]*draw/i,                         'ชนะ battle → จั่ว',    u => { u._grantedOnWinDraw = true; }],
+    [/attacks[^"]*draw/i,                                'เมื่อโจมตี → จั่ว',     u => { u._grantedAttackDraw = true; }],
+  ];
+  function parseGrantedAbility(quotedText) {
+    for (const [re, label, apply, clear] of GRANTED_ABILITIES) if (re.test(quotedText)) return { label, apply, clear };
+    return null;
+  }
+  // Pulls the quoted ability out of a clause and works out who receives it. "on your opponent's
+  // ... give them X" targets the enemy; otherwise the grant stays on your own side.
+  function matchAbilityGrant(fx) {
+    const q = [...(fx || '').matchAll(/["“]([^"”]{4,300})["”]/g)].map(m => m[1]);
+    if (!q.length) return null;
+    for (const text of q) {
+      if (parseUnblockableGrant(text)) return null; // handled by the dedicated unblockable branch
+      const ab = parseGrantedAbility(text);
+      if (!ab) continue;
+      const selfGrant = /this (?:character|card) (?:gains?|gets)\s*["“]/i.test(fx);
+      const chosen = /choose (?:up to )?\d+ /i.test(fx) &&
+        /(?:it|them|they|that character) (?:gains?|gets)\s*["“]|give (?:it|them|that character)(?: the effect)?\s*["“]/i.test(fx);
+      if (!selfGrant && !chosen) continue;
+      return {
+        ...ab, scope: selfGrant && !chosen ? 'self' : 'chosen', enemy: /opponent'?s/i.test(fx),
+        // "during this turn" ends at the next turn start; "until the start of your next turn"
+        // spans the opponent's turn too, so it needs one extra turn boundary.
+        untilOwnNextTurn: /until the start of your next turn/i.test(fx),
+      };
+    }
+    return null;
+  }
+  async function resolveAbilityGrant(p, unit, g) {
+    let target = unit;
+    if (g.scope === 'chosen') {
+      const owner = g.enemy ? Engine.opponentOf(p) : p;
+      const pool = (g.enemy ? owner.front : [...owner.front, ...owner.energy])
+        .filter(u => u.card.type === 'Character' && (!g.enemy || (!u.kw.untargetable && !u.tempUntargetable)));
+      if (!pool.length) return;
+      const uid = g.enemy
+        ? await p.controller.chooseEnemyCharacter(p, pool, `เลือก character ศัตรู: ${g.label}`, true)
+        : await p.controller.chooseOwnCharacter(p, pool, `เลือก character: ${g.label}`, true);
+      target = pool.find(x => x.uid === uid);
+    }
+    if (!target) return;
+    g.apply(target);
+    if (g.clear) {
+      const t = target;
+      Engine.scheduleDelayedAction(Engine.G.turn + (g.untilOwnNextTurn ? 2 : 1), () => g.clear(t));
+    }
+    log(`${target.card.name}: ${g.label} เทิร์นนี้`);
+  }
   // "... this character gains "This character cannot be blocked by ..." during this turn." — the
   // grant lands on this card itself (no target choice).
   function matchSelfUnblockableGrant(fx) {
@@ -630,6 +696,8 @@
         target = units.find(x => x.uid === uid);
       }
       if (target) applyUnblockableGrant(target, rc);
+    } else if ((rc = matchAbilityGrant(fx))) {
+      await resolveAbilityGrant(p, unit, rc);
     } else if ((rc = matchAllOwnBuff(fx))) {
       const pool = rc.zone === 'front' ? p.front : [...p.front, ...p.energy];
       for (const u of pool) u.bpMod += rc.amount;
@@ -703,6 +771,8 @@
         target = units.find(x => x.uid === uid);
       }
       if (target) applyUnblockableGrant(target, m);
+    } else if ((m = matchAbilityGrant(fx))) {
+      await resolveAbilityGrant(p, unit, m);
     }
   };
 
@@ -746,6 +816,11 @@
         const t = units.find(x => x.uid === uid);
         if (t) applyUnblockableGrant(t, rc);
       }
+    } else if ((rc = findSeg(card.effect, seg => { const g = matchAbilityGrant(seg); return g && g.scope === 'chosen' ? g : null; }))) {
+      // an Event has no unit of its own, so only grants aimed at a chosen character apply here
+      const dn = (card.effect || '').match(/Draw (\d+) cards?/i);
+      if (dn) { draw(p, parseInt(dn[1])); log(`${card.name}: จั่ว ${dn[1]} ใบ`); }
+      await resolveAbilityGrant(p, null, rc);
     } else if ((dd = findSeg(card.effect, matchDrawDiscard))) {
       draw(p, dd.drawN);
       log(`${card.name}: จั่ว ${dd.drawN} ใบ`);
@@ -1072,6 +1147,19 @@
         };
       }
     }
+    // same shape, but granting one of the other quoted abilities (see GRANTED_ABILITIES)
+    {
+      const g = matchAbilityGrant(fx);
+      if (g) {
+        const dis = fx.match(/\[Discard (\d+)\]/i);
+        return {
+          kind: 'grantAbility', grant: g,
+          rest: /\[Rest this card\]/i.test(fx),
+          discardN: dis ? parseInt(dis[1]) : 0,
+          oncePerTurn: /\[1 Per Turn\]/i.test(fx),
+        };
+      }
+    }
     return null;
   }
 
@@ -1127,6 +1215,13 @@
       if (mm.rest) unit.rested = true;
       if (mm.oncePerTurn) unit._usedTurn = Engine.G.turn;
       applyUnblockableGrant(target, mm.grant);
+    } else if (mm.kind === 'grantAbility') {
+      if (mm.oncePerTurn && unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (mm.rest && unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      for (let i = 0; i < mm.discardN; i++) if (!await manualDiscardToRemoval(p)) return;
+      if (mm.rest) unit.rested = true;
+      if (mm.oncePerTurn) unit._usedTurn = Engine.G.turn;
+      await resolveAbilityGrant(p, unit, mm.grant);
     } else if (mm.kind === 'restDrawDiscard') {
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;
