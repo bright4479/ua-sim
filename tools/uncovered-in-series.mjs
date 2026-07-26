@@ -62,7 +62,7 @@ function hasKeywordOnly(c) {
   const passiveText = /if this character is active, increase|generates \d* ?addition\w*|reduce the required energy|reduce the energy requirement|reduce this card'?s required energy|energy requirement is reduced|reduce the AP cost of this card|if this (?:character|card) is active,? it gains \[?\w*\]? energy generation/i.test(c.effect || '');
   return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||
     kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.unblockableBPMin != null || kw.alsoTreatedAs.length ||
-    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || kw.immuneBpReduction || kw.snipeMaxBP != null || passiveText || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
+    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || kw.immuneBpReduction || kw.snipeMaxBP != null || kw.mustBeBlocked || kw.mustBlock || passiveText || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
 }
 
 const seriesArg = process.argv[2];

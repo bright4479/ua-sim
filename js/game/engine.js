@@ -44,6 +44,8 @@ const Engine = (() => {
       retireToRemoval: false,     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
       immuneBpReduction: false,   // "This character is not affected by BP reducing effects." (clamped inside bp(), so it covers every debuff source at once)
       snipeMaxBP: null,           // "[Snipe] cannot target characters with BP N or more." — upper bound on this unit's snipe targets
+      mustBeBlocked: false,       // "Your opponent must block this character's attack if possible." — blocking this attacker is mandatory
+      mustBlock: false,           // "This character must block your opponent's attack if possible." — the obligation sits on the defender
     };
     const im = fxStatic.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
@@ -119,6 +121,15 @@ const Engine = (() => {
     if (/not affected by BP[- ]?reduc\w*/i.test(fxStatic)) kw.immuneBpReduction = true;
     // "This character [Snipe] cannot target characters with BP2000 or more." — caps which units
     // this one may snipe (distinct from the unblockable-BP keywords, which cap its blockers).
+    // Blocking obligations. The two directions differ only by which side is named first, and the
+    // data spells the qualifier as "if possible" / "if able" / "if able to" / omits it entirely.
+    // Only clauses that are not activated abilities count as printed keywords — "[Main] [Pay 1 AP]
+    // ... opponent must block this character's attack" is a costed, once-per-turn ability, and
+    // treating it as static would hand it over permanently and for free.
+    // (a stray leading cost number is a known scrape artifact, so it is skipped before the anchor)
+    const passiveSegs = fxStatic.split('@').filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s));
+    if (passiveSegs.some(s => /opponent(?:'?s)? must block this character(?:'?s)? attacks?/i.test(s))) kw.mustBeBlocked = true;
+    if (passiveSegs.some(s => /this character must block (?:your )?op(?:'s|ponent'?s)?/i.test(s))) kw.mustBlock = true;
     const snipeCap = fxStatic.match(/\[Sniper?\][^.]*cannot target characters? with BP\s*(\d+) or more/i);
     if (snipeCap) kw.snipeMaxBP = parseInt(snipeCap[1]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
@@ -193,6 +204,8 @@ const Engine = (() => {
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
       tempUnblockableNeedMin: null, // granted "cannot be blocked by characters with required energy N or more" (approximated as lasting the rest of the turn, not just "until the end of the attack")
       tempCanAttackFromEnergy: false, // granted "this character can attack from your Energy Line" this turn
+      tempMustBeBlocked: false, // granted "your opponent must block this character's attack" this turn (temp counterpart to kw.mustBeBlocked)
+      tempMustBlock: false,     // granted "this character must block" this turn (temp counterpart to kw.mustBlock)
       _grantedAttackDrawN: null, // granted "[When Attacking] draw up to N cards" this turn (N > 1, sibling of _grantedAttackDraw's flat +1)
       tempRaidable: false,      // granted "your [Raid] cards can raid on this character" this turn (any raider qualifies)
       tempCannotMove: false,    // granted "cannot move" until a scheduled point (temp counterpart to kw.cannotMove) —
@@ -844,9 +857,20 @@ const Engine = (() => {
           (atk.tempUnblockableNeedMin == null || (u.card.need || 0) < atk.tempUnblockableNeedMin) &&
           (!atk.kw.unblockableByRaided || !u.under.length));
         if (candidates.length) {
-          const b = await enemy.controller.chooseBlocker(enemy, atk, candidates);
-          if (b) {
-            blocker = candidates.find(u => u.uid === b);
+          // Blocking obligations. "This character must block your opponent's attack" narrows the
+          // choice to the obliged defenders; "your opponent must block this character's attack"
+          // makes blocking mandatory. Either way the defender may still pick among legal blockers,
+          // but declining is not an option — if the controller passes, the sturdiest one blocks.
+          const obliged = candidates.filter(u => u.kw.mustBlock || u.tempMustBlock);
+          const pool = obliged.length ? obliged : candidates;
+          const mustBlock = obliged.length > 0 || atk.kw.mustBeBlocked || atk.tempMustBeBlocked;
+          const b = await enemy.controller.chooseBlocker(enemy, atk, pool);
+          if (b || mustBlock) {
+            blocker = pool.find(u => u.uid === b);
+            if (!blocker && mustBlock) {
+              blocker = pool.reduce((best, u) => (bp(u) > bp(best) ? u : best), pool[0]);
+              log(`${enemy.name}: ต้องบล็อก — ${blocker.card.name} ถูกเลือกอัตโนมัติ`);
+            }
             if (blocker) {
               blocker.rested = true;
               blocker.blockedThisTurn++;
@@ -1116,7 +1140,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedAttackDrawN = null; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedAttackDrawN = null; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; u.tempMustBeBlocked = false; u.tempMustBlock = false; }
     p.pendingDiscount = null;
     G._noRemovalByEffectsThisTurn = false;
     update();

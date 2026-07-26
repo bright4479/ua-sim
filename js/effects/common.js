@@ -423,6 +423,8 @@
     [/cannot block/i,                                    'ห้ามบล็อก',            u => { u.tempCannotBlock = true; }, u => { u.tempCannotBlock = false; }],
     [/cannot move/i,                                     'ห้ามเคลื่อนที่',        u => { u.tempCannotMove = true; }, u => { u.tempCannotMove = false; }],
     [/cannot be chosen/i,                                'ไม่ถูกเลือกเป็นเป้าหมาย', u => { u.tempUntargetable = true; }],
+    [/opponent(?:'?s)? must block this character(?:'?s)? attacks?/i, 'ศัตรูต้องบล็อกการโจมตีนี้', u => { u.tempMustBeBlocked = true; }],
+    [/this character must block (?:your )?op(?:'s|ponent'?s)?/i, 'ต้องบล็อกการโจมตีของศัตรู',  u => { u.tempMustBlock = true; }],
     [/attacks? and is not blocked[^"]*draw/i,            'โจมตีไม่ถูกบล็อก → จั่ว', u => { u._grantedUnblockedDraw = true; }],
     [/wins? a battle[^"]*draw/i,                         'ชนะ battle → จั่ว',    u => { u._grantedOnWinDraw = true; }],
     [/attacks[^"]*draw/i,                                'เมื่อโจมตี → จั่ว',     u => { u._grantedAttackDraw = true; }],
