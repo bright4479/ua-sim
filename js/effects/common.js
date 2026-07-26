@@ -393,6 +393,34 @@
     const m = fx.match(/^\[When Attacking\]\s*This character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i);
     return m ? parseInt(m[1]) : null;
   }
+  // Grants of the quoted "cannot be blocked by ..." ability. These read as a keyword but are
+  // temporary and usually costed, so `parseKeywords` deliberately ignores anything inside quotes
+  // (it used to hand out the ability permanently and for free). They resolve here instead, onto
+  // the `tempUnblockableBP` / `tempUnblockableBPMin` unit fields that expire at End Phase.
+  // Returns {dir:'max'|'min', bp} — 'max' = weak blockers barred, 'min' = strong blockers barred.
+  function parseUnblockableGrant(text) {
+    const m = (text || '').match(/cannot\s+(?:be\s+)?blocked?\s+by\s+(?:(?:an?\s+)?characters?\s+(?:with|of)\s+)?(?:BP\s*(\d+)|(\d+)\s*BP|(\d+))\s*(?:BP\s*)?or\s+(less|lower|more|higher|greater)/i);
+    if (!m) return null;
+    return { dir: /less|lower/i.test(m[4]) ? 'max' : 'min', bp: parseInt(m[1] || m[2] || m[3]) };
+  }
+  function applyUnblockableGrant(u, g) {
+    if (g.dir === 'max') u.tempUnblockableBP = g.bp; else u.tempUnblockableBPMin = g.bp;
+    log(`${u.card.name}: ไม่ถูกบล็อกโดย character BP ${g.bp} ${g.dir === 'max' ? 'หรือน้อยกว่า' : 'ขึ้นไป'} เทิร์นนี้`);
+  }
+  // "... this character gains "This character cannot be blocked by ..." during this turn." — the
+  // grant lands on this card itself (no target choice).
+  function matchSelfUnblockableGrant(fx) {
+    if (!/this (?:character|card) (?:gains?|gets)\s*["“]/i.test(fx)) return null;
+    return parseUnblockableGrant(fx);
+  }
+  // "... Choose up to 1 <criteria> character on your area, it gains "...cannot be blocked..."" —
+  // the grant lands on a chosen character.
+  function matchChosenUnblockableGrant(fx) {
+    if (!/choose (?:up to )?1 /i.test(fx)) return null;
+    if (!/(?:it|they|that character) (?:gains?|gets)\s*["“]|give (?:it|them)\s*["“]/i.test(fx)) return null;
+    return parseUnblockableGrant(fx);
+  }
+
   // "[On Play] All characters on your area/Front Line get +N BP during this turn." — unconditional,
   // no target choice, applies to every own character at once.
   function matchAllOwnBuff(fx) {
@@ -575,6 +603,16 @@
       if (Engine.G.retiredThisTurn) await debuffEnemyFront(p, -parseInt(m[1]));
     } else if (/^\[On Play\]/i.test(fx) && (m = matchBounceEnemy(fx))) {
       await bounceEnemyFront(p, m);
+    } else if ((rc = matchChosenUnblockableGrant(fx)) || (rc = matchSelfUnblockableGrant(fx))) {
+      // grant of the quoted "cannot be blocked by ..." ability (see parseUnblockableGrant)
+      let target = unit;
+      if (matchChosenUnblockableGrant(fx)) {
+        const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character');
+        if (!units.length) return;
+        const uid = await p.controller.chooseOwnCharacter(p, units, 'เลือก character รับความสามารถ "ไม่ถูกบล็อก"', true);
+        target = units.find(x => x.uid === uid);
+      }
+      if (target) applyUnblockableGrant(target, rc);
     } else if ((rc = matchAllOwnBuff(fx))) {
       const pool = rc.zone === 'front' ? p.front : [...p.front, ...p.energy];
       for (const u of pool) u.bpMod += rc.amount;
@@ -634,6 +672,15 @@
     } else if ((m = matchAttackSelfBuff(fx))) {
       unit.bpMod += m;
       log(`[When Attacking] ${unit.card.name}: +${m} BP เทิร์นนี้`);
+    } else if ((m = matchChosenUnblockableGrant(fx)) || (m = matchSelfUnblockableGrant(fx))) {
+      let target = unit;
+      if (matchChosenUnblockableGrant(fx)) {
+        const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character');
+        if (!units.length) return;
+        const uid = await p.controller.chooseOwnCharacter(p, units, 'เลือก character รับความสามารถ "ไม่ถูกบล็อก"', true);
+        target = units.find(x => x.uid === uid);
+      }
+      if (target) applyUnblockableGrant(target, m);
     }
   };
 
@@ -977,6 +1024,21 @@
     // "[Main] [Rest this card] Draw N card(s), place N2 card(s) from your hand to the Outside Area."
     if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*Draw (\d+) cards?,?\s*place (\d+) cards? from your hand to the Outside Area\.?$/i)))
       return { kind: 'restDrawDiscard', drawN: parseInt(m[1]), discardN: parseInt(m[2]) };
+    // "[Main] [Rest this card]? [Discard N]? [1 Per Turn]? this character gains "cannot be blocked
+    // by ..." during this turn." — the costs are read off the same clause and paid on activation.
+    {
+      const g = matchSelfUnblockableGrant(fx) || matchChosenUnblockableGrant(fx);
+      if (g) {
+        const dis = fx.match(/\[Discard (\d+)\]/i);
+        return {
+          kind: 'grantUnblockable', grant: g,
+          chosen: !matchSelfUnblockableGrant(fx),
+          rest: /\[Rest this card\]/i.test(fx),
+          discardN: dis ? parseInt(dis[1]) : 0,
+          oncePerTurn: /\[1 Per Turn\]/i.test(fx),
+        };
+      }
+    }
     return null;
   }
 
@@ -1017,6 +1079,21 @@
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;
       await debuffEnemyFront(p, -mm.n);
+    } else if (mm.kind === 'grantUnblockable') {
+      if (mm.oncePerTurn && unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (mm.rest && unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      let target = unit;
+      if (mm.chosen) {
+        const units = [...p.front, ...p.energy].filter(u => u.card.type === 'Character');
+        if (!units.length) return;
+        const uid = await p.controller.chooseOwnCharacter(p, units, 'เลือก character รับความสามารถ "ไม่ถูกบล็อก"', true);
+        target = units.find(x => x.uid === uid);
+        if (!target) return;
+      }
+      for (let i = 0; i < mm.discardN; i++) if (!await manualDiscardToRemoval(p)) return;
+      if (mm.rest) unit.rested = true;
+      if (mm.oncePerTurn) unit._usedTurn = Engine.G.turn;
+      applyUnblockableGrant(target, mm.grant);
     } else if (mm.kind === 'restDrawDiscard') {
       if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
       unit.rested = true;

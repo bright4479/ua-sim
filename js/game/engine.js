@@ -8,11 +8,18 @@ const Engine = (() => {
   // ---------- keyword parsing from effect text ----------
   function parseKeywords(c) {
     const fx = (c.effect || '');
+    // A keyword phrase inside quotation marks is never this card's own printed keyword — it is the
+    // text of an ability being GRANTED ("this character gains "...cannot be blocked..." during this
+    // turn", "give it "This character cannot move""). Those grants are temporary and usually cost
+    // something, so the static flags below must be read from the unquoted text only; otherwise the
+    // card silently gets the ability permanently and for free (this affected 89 main-set cards).
+    // Grants are applied at resolve time through the temp unit fields (tempUnblockableBP, etc.).
+    const fxStatic = fx.replace(/"[^"]*"/g, ' ').replace(/“[^”]*”/g, ' ');
     const kw = {
       step: /\[Step\]/i.test(fx),
       // the source data spells this keyword "[Sniper]" on 113 cards and "[Snipe]" on only 4 —
       // matching just the latter silently disabled the keyword on almost every card that has it.
-      snipe: /\[Sniper?\]/i.test(fx),
+      snipe: /\[Sniper?\]/i.test(fxStatic),
       doubleAttack: /\[Double Attack\]/i.test(fx),
       doubleBlock: /\[Double Block\]/i.test(fx),
       nullifyImpact: /\[(Nullify Impact|Impact Negate|Impact Nagate)\]/i.test(fx), // "Nagate" is a recurring data-entry typo of "Negate"
@@ -38,10 +45,10 @@ const Engine = (() => {
       immuneBpReduction: false,   // "This character is not affected by BP reducing effects." (clamped inside bp(), so it covers every debuff source at once)
       snipeMaxBP: null,           // "[Snipe] cannot target characters with BP N or more." — upper bound on this unit's snipe targets
     };
-    const im = fx.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
+    const im = fxStatic.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
-    else if (/\[Impact\]/i.test(fx)) kw.impact = 1;
-    const dm = fx.match(/\[Damage\s*\(?(\d)\)?\s*\]/i);
+    else if (/\[Impact\]/i.test(fxStatic)) kw.impact = 1;
+    const dm = fxStatic.match(/\[Damage\s*\(?(\d)\)?\s*\]/i);
     if (dm) kw.dmg = parseInt(dm[1]);
     // [Raid] <Name> or [Raid] [Affinity]
     const raidLine = fx.match(/\[Raid\]\s*(<[^>]+>|\[[^\]]+\])/i);
@@ -65,12 +72,18 @@ const Engine = (() => {
       else if (traitCond) kw.entersActiveIf = { kind: 'traitCount', n: parseInt(traitCond[1]), trait: traitCond[2].trim().toLowerCase() };
       else kw.entersActive = true;
     }
-    // "This character cannot be blocked by characters with BP N or less." (or "N BP or less")
-    const unblock = fx.match(/cannot be blocked by characters? with (?:BP ?(\d+)|(\d+) ?BP) or (?:less|lower)/i);
-    if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2]);
-    // ... or "BP N or more/higher" — the opposite direction (only weak characters may block).
-    const unblockMin = fx.match(/cannot be blocked by characters? with (?:BP ?(\d+)|(\d+) ?BP) or (?:more|higher)/i);
-    if (unblockMin) kw.unblockableBPMin = parseInt(unblockMin[1] || unblockMin[2]);
+    // "This character cannot be blocked by characters with BP N or less." — the source data also
+    // writes this as "cannot blocked by" (missing "be"), "by a character with", "of N BP",
+    // "N or more BP", "BP2000 or lower characters" (threshold before the noun) and "or greater",
+    // so the threshold and the noun are matched in either order.
+    const UNBLOCK_HEAD = 'cannot\\s+(?:be\\s+)?blocked?\\s+by\\s+';
+    const UNBLOCK_AMT = '(?:(?:an?\\s+)?characters?\\s+(?:with|of)\\s+)?(?:BP\\s*(\\d+)|(\\d+)\\s*BP|(\\d+))\\s*(?:BP\\s*)?';
+    const mkUnblock = dir => new RegExp(UNBLOCK_HEAD + UNBLOCK_AMT + 'or\\s+(?:' + dir + ')', 'i');
+    const unblock = fxStatic.match(mkUnblock('less|lower'));
+    if (unblock) kw.unblockableBP = parseInt(unblock[1] || unblock[2] || unblock[3]);
+    // ... or "BP N or more/higher/greater" — the opposite direction (only weak characters may block).
+    const unblockMin = fxStatic.match(mkUnblock('more|higher|greater'));
+    if (unblockMin) kw.unblockableBPMin = parseInt(unblockMin[1] || unblockMin[2] || unblockMin[3]);
     // "This character cannot block." / "cannot attack." / "cannot attack or block." (permanent,
     // printed as its own bare clause — the combined form covers both flags from one match).
     {
@@ -103,10 +116,10 @@ const Engine = (() => {
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
     if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
     // "This character is not affected by BP reducing effects." (permanent)
-    if (/not affected by BP[- ]?reduc\w*/i.test(fx)) kw.immuneBpReduction = true;
+    if (/not affected by BP[- ]?reduc\w*/i.test(fxStatic)) kw.immuneBpReduction = true;
     // "This character [Snipe] cannot target characters with BP2000 or more." — caps which units
     // this one may snipe (distinct from the unblockable-BP keywords, which cap its blockers).
-    const snipeCap = fx.match(/\[Sniper?\][^.]*cannot target characters? with BP\s*(\d+) or more/i);
+    const snipeCap = fxStatic.match(/\[Sniper?\][^.]*cannot target characters? with BP\s*(\d+) or more/i);
     if (snipeCap) kw.snipeMaxBP = parseInt(snipeCap[1]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
@@ -126,11 +139,11 @@ const Engine = (() => {
     // "cannot be chosen by your opponent's character's effect / Event Card (from hand) / effect" —
     // approximated as blanket immunity from opponent targeting (a slight over-grant when the
     // printed text is actually scoped to only Character-effects or only Event-cards, but safe).
-    if (/cannot be chosen by your opponent'?s (?:character'?s effect|event card(?: from hand)?|event'?s effect|effect)/i.test(fx)) kw.untargetable = true;
+    if (/cannot be chosen by your opponent'?s (?:character'?s effect|event card(?: from hand)?|event'?s effect|effect)/i.test(fxStatic)) kw.untargetable = true;
     // "This character cannot be rested, moved or returned to the hand by your opponent's effects."
     // — a narrower bodyguard-style protection than full untargetability, approximated as the same
     // blanket kw.untargetable flag (slight over-grant, consistent with the approximation above).
-    if (/cannot be rested,? moved,? or returned to (?:the|your) hand by (?:your )?opponent'?s effects/i.test(fx)) kw.untargetable = true;
+    if (/cannot be rested,? moved,? or returned to (?:the|your) hand by (?:your )?opponent'?s effects/i.test(fxStatic)) kw.untargetable = true;
     return kw;
   }
 
