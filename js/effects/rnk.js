@@ -544,4 +544,20 @@
       log(`${unit.card.name}: จะไม่ stand ครั้งถัดไป`);
     },
   };
+
+  // 013 Shikijo — [Your Turn][When in Frontline] if your <Aoshi Shinomori> would leave the area by
+  // your opponent's effect, you may retire this active character instead.
+  reg['UA41BT-RNK-1-013'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self || ctx.reason !== 'effect' || !ctx.byOpponent) return false;
+      if (!(leaving.card.name || '').includes('Aoshi Shinomori')) return false;
+      if (!p.front.includes(self) || self.rested) return false;
+      if (Engine.G.players[Engine.G.active] !== p) return false; // [Your Turn]
+      const v = await p.controller.chooseOption(p, `${self.card.name}: retire ตัวเองแทน ${leaving.card.name}?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return false;
+      await Engine.sidelineUnit(p, self, 'effect');
+      return true;
+    },
+  };
 })();

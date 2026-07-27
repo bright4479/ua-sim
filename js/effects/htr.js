@@ -1182,4 +1182,21 @@
       return (Engine.G.players[Engine.G.active] === p && (unit.bpMod || 0) > 0) ? 1000 : 0;
     },
   };
+
+  // 2-026 White Goreinu — [When in Energy Line] if a <Goreinu> on your Front Line with BP 500 or
+  // higher is retired, you may retire this character instead; if you did, move that Goreinu to the
+  // Energy Line. (Previously skipped for want of a pre-removal hook.)
+  reg['HTR-2-026'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self || !p.energy.includes(self)) return false;
+      if (!p.front.includes(leaving)) return false;
+      if (!(leaving.card.name || '').includes('Goreinu') || Engine.bp(leaving) < 500) return false;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: retire ตัวเองแทน ${leaving.card.name}?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return false;
+      await Engine.sidelineUnit(p, self, 'effect');
+      if (p.energy.length < 4) await Engine.moveUnitFree(p, leaving, 'energy');
+      return true;
+    },
+  };
 })();

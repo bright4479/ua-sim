@@ -1168,6 +1168,19 @@
   //  • 2-072 / 1-094 Lin — "teammates cannot be chosen by opponent's events/characters" aura (no
   //    field-wide targeting-protection layer; kw.untargetable is per-card-self only)
   //  • 1-011 W — "attacks and is NOT blocked -> draw to 2" (no post-block-declaration hook)
-  //  • 1-106 Ace — substitute-retire replacement (same class as HTR White Goreinu)
   // ────────────────────────────────────────────────────────────────────────
+
+  // 1-106 Ace — [When in Frontline] if another character on your area is retired, other than by its
+  // BP becoming 0 or less, you may retire this character instead.
+  reg['UA30ST-ARK-1-106'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self || ctx.reason === 'bp0') return false;
+      if (!p.front.includes(self)) return false;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: retire ตัวเองแทน ${leaving.card.name}?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return false;
+      await Engine.sidelineUnit(p, self, 'effect');
+      return true;
+    },
+  };
 })();

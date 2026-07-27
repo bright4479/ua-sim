@@ -1010,6 +1010,15 @@ const Engine = (() => {
   async function resolveTrigger(p, c) {
     const enemy = opponentOf(p);
     G._triggerActivatedThisTurn = true; // for "if you/opponent activated a Trigger effect this turn" cards
+    // A Trigger resolves for the player who just lost Life, i.e. usually the non-active player, so
+    // anything it removes belongs to the active player. Flagging the window lets replacement effects
+    // recognise "removed by your opponent's effect" even though it happens on the owner's own turn.
+    G._resolvingTrigger = (G._resolvingTrigger || 0) + 1;
+    try {
+      return await resolveTriggerInner(p, c, enemy);
+    } finally { G._resolvingTrigger--; }
+  }
+  async function resolveTriggerInner(p, c, enemy) {
     switch (c.trigger) {
       case 'Draw':
         draw(p, 1);
@@ -1158,11 +1167,43 @@ const Engine = (() => {
     if (area === 'sideline') await Effects.onSideline(G, p, unit, 'effect');
   }
 
+  // Replacement effects: before a unit actually leaves, every unit its controller owns gets a
+  // chance to cancel the removal ("if this character would leave the field by your opponent's
+  // effect, it does not instead", "you may retire this character instead"). The hook pays its own
+  // cost and returns truthy to mean "the removal does not happen".
+  //
+  // `byOpponent` is inferred from whose turn it is rather than threaded through every call site:
+  // a unit removed by an effect on its controller's own turn is their own doing, otherwise it is
+  // the opponent's. That covers the printed wordings without retrofitting ~50 effect files, but it
+  // cannot tell a Character effect from an Event or Trigger effect, so cards that name one of
+  // those specifically are treated as "any opponent effect".
+  async function offerLeaveFieldReplacement(owner, unit, reason) {
+    if (G._resolvingReplacement) return false; // a replacement's own cost must not re-enter this
+    const fromTrigger = !!G._resolvingTrigger;
+    const ctx = { reason, fromTrigger, byOpponent: owner !== G.players[G.active] || fromTrigger };
+    const watchers = [...owner.front, ...owner.energy].filter(u => u !== unit).concat([unit]);
+    G._resolvingReplacement = true;
+    try {
+      for (const w of watchers) {
+        const h = Effects.registry[w.no]?.onBeforeLeaveField;
+        if (!h) continue;
+        try {
+          if (await h(G, owner, unit, ctx, w)) {
+            log(`${unit.card.name}: ไม่ถูกนำออกจากสนาม (ผลของ ${w.card.name})`);
+            return true;
+          }
+        } catch (e) { console.error(e); }
+      }
+    } finally { G._resolvingReplacement = false; }
+    return false;
+  }
+
   // finds & removes `unit` from owner's front/energy line, sends it to Sideline.
   // reason: 'battle' | 'effect' | 'bp0'
   async function sidelineUnit(owner, unit, reason = 'effect') {
     if (unit.noRetire) { log(`${unit.card.name}: ไม่ถูก retire (ผล "will not be retired")`); return; }
     if (reason === 'effect' && G._noRemovalByEffectsThisTurn) { log(`${unit.card.name}: ไม่ถูก retire (ผล "cannot be removed by effects" เทิร์นนี้)`); return; }
+    if (await offerLeaveFieldReplacement(owner, unit, reason)) return;
     G.retiredThisTurn = (G.retiredThisTurn || 0) + 1; // tracked for "if a character was retired this turn" cards
     for (const line of [owner.front, owner.energy]) {
       const i = line.indexOf(unit);
@@ -1317,6 +1358,11 @@ const Engine = (() => {
 //   onEvent(G,p,card)         — when an Event card is used
 //   onMain(G,p,unit)          — [Activate: Main] ability, invoked by the player via the unit menu
 //   onLeaveField(G,p,unit)    — unit leaves front/energy line for any reason
+//   onBeforeLeaveField(G,p,leavingUnit,ctx,selfUnit) -> truthy cancels the removal — fires on every
+//     unit p controls (the leaving one last) just before a retire, for replacement effects such as
+//     "if this character would leave the field by your opponent's effect, it does not instead" or
+//     "you may retire this character instead". The hook pays its own cost. ctx = {reason, byOpponent}
+//     where byOpponent is inferred from the active player (see offerLeaveFieldReplacement).
 //   onSideline(G,p,unit,reason) — unit specifically sidelined ('battle'|'effect'|'bp0')
 //   onTurnStart(G,p,unit)     — start of the unit owner's turn
 //   onAttackPhaseStart(G,p,unit) — start of the unit owner's own Attack Phase (later in the same

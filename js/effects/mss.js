@@ -283,4 +283,22 @@
       if (H.hasCardNamed(p, 'Aoba Wakura')) await H.apUntap(p, 1);
     },
   };
+
+  // 034 Yachiho Azuma — if you have 2+ cards in hand and your <Himari Azuma> would leave the area by
+  // your opponent's Event effect, you may rest this active character and place 2 cards from your
+  // hand to the Outside Area instead. (Event-vs-other source is not distinguishable — any opponent
+  // effect qualifies.)
+  reg['UA49BT-MSS-1-034'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self || ctx.reason !== 'effect' || !ctx.byOpponent) return false;
+      if (!(leaving.card.name || '').includes('Himari Azuma')) return false;
+      if (self.rested || p.hand.length < 2) return false;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: วางนอนตัวเอง + ทิ้ง 2 ใบ แทนการเสีย ${leaving.card.name}?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return false;
+      self.rested = true;
+      for (let i = 0; i < 2; i++) await H.discardFromHand(p);
+      return true;
+    },
+  };
 })();

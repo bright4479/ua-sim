@@ -654,4 +654,36 @@
       if (t) { t.rested = false; t.bpMod += 500; log(`${unit.card.name}: ${t.card.name} Active และ +500 BP เทิร์นนี้`); }
     },
   };
+
+  // ---------- replacement effects (onBeforeLeaveField) ----------
+  // 074 Kirishima Eijiro — [Your Turn][1 Per Turn] if this character would leave the field by your
+  // opponent's effect, it does not instead. (The opponent-effect case during your own turn is a
+  // Trigger resolving off your attack, which ctx.byOpponent already accounts for.)
+  reg['MHA-1-074'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving !== self || ctx.reason !== 'effect' || !ctx.byOpponent) return false;
+      if (Engine.G.players[Engine.G.active] !== p) return false; // [Your Turn]
+      if (self._preventTurn === Engine.G.turn) return false;
+      self._preventTurn = Engine.G.turn;
+      return true;
+    },
+  };
+
+  // 093 Midoriya Izuku — [When in Frontline][1 Per Turn] if another character on your area would
+  // leave by an opponent's character effect, you may place 1 card from your Life to the Outside
+  // Area instead. (Character-vs-Event/Trigger source is not distinguishable — any opponent effect.)
+  reg['MHA-1-093'] = {
+    async onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self || ctx.reason !== 'effect' || !ctx.byOpponent) return false;
+      if (!p.front.includes(self) || !p.life.length) return false;
+      if (self._preventTurn === Engine.G.turn) return false;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: ส่ง Life 1 ใบไป Outside Area แทนการเสีย ${leaving.card.name}?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return false;
+      self._preventTurn = Engine.G.turn;
+      p.sideline.push(p.life.pop());
+      log(`${self.card.name}: ส่ง Life 1 ใบไป Outside Area แทน`);
+      return true;
+    },
+  };
 })();
