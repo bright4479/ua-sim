@@ -815,4 +815,31 @@
       log(`${unit.card.name}: การ์ด Trait:Missilis ใบถัดไป ลด AP cost 1`);
     },
   };
+
+  // ---------- Life -> Outside Area reactions (onLifeToOutside) ----------
+  // 042 Dorothy — [Opponent's Turn][When in Frontline][1/turn] when a card without a Trigger is
+  // placed from your Life Area to the Outside Area, draw 1.
+  reg['NIK-1-042'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger || !p.front.includes(self)) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn) return;
+      self._lifeReactTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      Engine.log(`${self.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 046 Noah — same trigger, but sets itself active and gains +1000 BP this turn.
+  reg['NIK-1-046'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn) return;
+      self._lifeReactTurn = Engine.G.turn;
+      self.rested = false;
+      self.bpMod += 1000;
+      Engine.log(`${self.card.name}: ตั้งขึ้น Active, +1000 BP เทิร์นนี้`);
+    },
+  };
 })();

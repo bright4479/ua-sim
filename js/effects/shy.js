@@ -328,4 +328,49 @@
       log(`${unit.card.name}: Active`);
     },
   };
+
+  // ---------- Life -> Outside Area reactions (onLifeToOutside) ----------
+  // 009 Keheheh — [Opponent's Turn][When in Frontline][1/turn] when a [Draw] card is placed from your
+  // Life Area to the Outside Area, you may draw 1; if you did, place 1 card from your hand there.
+  reg['SHY-1-009'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger !== 'Draw' || !p.front.includes(self)) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn) return;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: จั่ว 1 ใบ (แล้วทิ้ง 1 ใบ)?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      self._lifeReactTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      Engine.log(`${self.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 012 Keheheh (Raid) — same trigger, +2000 BP this turn (no per-turn limit printed).
+  reg['SHY-1-012'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger !== 'Draw' || !p.front.includes(self)) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      self.bpMod += 2000;
+      Engine.log(`${self.card.name}: +2000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 018 Tzveta — [1/turn] same trigger: you may place 1 card from your hand to the Outside Area; if
+  // you did, rest up to 1 enemy Front Line character.
+  reg['SHY-1-018'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger !== 'Draw' || !p.front.includes(self)) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn || !p.hand.length) return;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: ทิ้ง 1 ใบเพื่อวางนอน character ศัตรู?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      const no = await H.discardFromHand(p);
+      if (no == null) return;
+      self._lifeReactTurn = Engine.G.turn;
+      await H.restEnemyFront(p);
+    },
+  };
 })();

@@ -761,4 +761,37 @@
   // 102 Rei Ayanami (4, ST) — [On Play] look at the top 2, keep any number on top, remainder to
   // the Outside Area.
   reg['UA44ST-EVA-1-102'] = { async onPlay(G, p, unit) { await H.lookTopAndDiscard(p, 2, 2, `${unit.card.name}: ดูบนสุด 2 ใบ`); } };
+
+  // ---------- Life -> Outside Area reactions (onLifeToOutside) ----------
+  function noTriggerOnArea(p) { return [...p.front, ...p.energy].filter(u => !u.card.trigger).length; }
+
+  // 087 Asuka Langley Shikinami — [Opponent's Turn][1/turn] when a card without a Trigger goes from
+  // your Life Area to the Outside Area and you have 4+ Trigger-less cards on your area, +2000 BP.
+  reg['UA44BT-EVA-1-087'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger || noTriggerOnArea(p) < 4) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn) return;
+      self._lifeReactTurn = Engine.G.turn;
+      self.bpMod += 2000;
+      log(`${self.card.name}: +2000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 092 Mari Illustrious Makinami — same condition: you may rest this active character; if you did,
+  // add up to 1 of the cards just placed in the Outside Area to your hand.
+  reg['UA44BT-EVA-1-092'] = {
+    async onLifeToOutside(G, p, card, self) {
+      if (card.trigger || noTriggerOnArea(p) < 4 || self.rested) return;
+      if (Engine.G.players[Engine.G.active] === p) return; // [Opponent's Turn]
+      if (self._lifeReactTurn === Engine.G.turn) return;
+      const v = await p.controller.chooseOption(p, `${self.card.name}: วางนอนตัวเองเพื่อเก็บ ${card.name} เข้ามือ?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      self._lifeReactTurn = Engine.G.turn;
+      self.rested = true;
+      const i = p.sideline.lastIndexOf(card.no);
+      if (i >= 0) { p.sideline.splice(i, 1); p.hand.push(card.no); log(`${self.card.name}: เพิ่ม ${card.name} เข้ามือ`); }
+    },
+  };
 })();

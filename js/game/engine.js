@@ -991,7 +991,15 @@ const Engine = (() => {
         if (used) await resolveTrigger(defenderP, c);
       }
       // card goes to sideline unless the trigger moved it elsewhere (Get / Raid)
-      if (!defenderP._triggerConsumed) defenderP.sideline.push(no);
+      if (!defenderP._triggerConsumed) {
+        defenderP.sideline.push(no);
+        // "when a card with [Draw] / without a Trigger is placed from your Life Area to the Outside
+        // Area, ..." — broadcast to every unit the Life's owner controls
+        for (const u of [...defenderP.front, ...defenderP.energy]) {
+          const h = Effects.registry[u.no]?.onLifeToOutside;
+          if (h) { try { await h(G, defenderP, c, u); } catch (e) { console.error(e); } }
+        }
+      }
       defenderP._triggerConsumed = false;
       update();
       if (G.over) return;
@@ -1358,6 +1366,8 @@ const Engine = (() => {
 //   onEvent(G,p,card)         — when an Event card is used
 //   onMain(G,p,unit)          — [Activate: Main] ability, invoked by the player via the unit menu
 //   onLeaveField(G,p,unit)    — unit leaves front/energy line for any reason
+//   onLifeToOutside(G,p,card,selfUnit) — a Life card was revealed by damage and went to the Outside
+//     Area (its Trigger, if any, has already resolved); fires on every unit its owner controls
 //   onBeforeLeaveField(G,p,leavingUnit,ctx,selfUnit) -> truthy cancels the removal — fires on every
 //     unit p controls (the leaving one last) just before a retire, for replacement effects such as
 //     "if this character would leave the field by your opponent's effect, it does not instead" or
