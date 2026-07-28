@@ -974,4 +974,141 @@
   //   invoking arbitrary other cards' onMain logic; too open-ended to implement safely.
   // JJK-3-050: "cannot be removed by opponent's character effect with BP4000+" — a narrow
   //   conditional-immunity variant not covered by the generic untargetable keyword.
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  const fingersInSideline = p => p.sideline.filter(no => (byNo(no)?.name || '').includes("Sukuna's Finger")).length;
+
+  // 005 Inumaki Toge — [Main][Pay 1 AP][1 Per Turn] every character on your Front Line +1000 BP.
+  reg['JJK-1-005'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (!Engine.payApForEffect(p, 1)) { p.controller.notify?.('AP ไม่พอ'); return; }
+      unit._usedTurn = Engine.G.turn;
+      for (const u of p.front) u.bpMod += 1000;
+      log(`${unit.card.name}: character บน Front Line ทุกตัว +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 012 Satoru Gojo — [On Play] draw 1, then the next card you use from hand this turn costs 1 less
+  // AP (any card except another <Satoru Gojo>).
+  reg['JJK-1-012'] = {
+    async onPlay(G, p, unit) {
+      Engine.draw(p, 1);
+      p.pendingDiscount = { predicate: c => !(c.name || '').includes('Satoru Gojo'), apDelta: -1 };
+      log(`${unit.card.name}: จั่ว 1 ใบ, การ์ดใบถัดไป (ที่ไม่ใช่ Satoru Gojo) ลด AP cost 1`);
+    },
+  };
+
+  // 017 Panda — flat passive +1000 BP printed alongside its keywords.
+  reg['JJK-1-017'] = { bpBonus() { return 1000; } };
+
+  // 040 Itadori Yuuji — [On Play] return up to 1 enemy Front Line character with BP 4000 or less
+  // to its owner's hand.
+  reg['JJK-1-040'] = { async onPlay(G, p, unit) { await H.bounceEnemyFront(p, 4000); } };
+
+  // 047 Sukuna — [On Play] rest 1 enemy Front Line character (it does not stand next time), then
+  // look at the top 5 and add 1 <Sukuna's Finger> or <Malevolent Shrine> to your hand.
+  reg['JJK-1-047'] = {
+    async onPlay(G, p, unit) {
+      const t = await H.restEnemyFront(p);
+      if (t) t.skipNextStand = true;
+      await H.lookTopAndTake(p, 5, c => c && (/Sukuna's Finger|Malevolent Shrine/i.test(c.name || '')), 1,
+        `${unit.card.name}: ดูการ์ดบนสุด 5 ใบ`);
+    },
+  };
+
+  // 048 Sukuna — [On Play][When in Frontline] your opponent returns 1 Front Line character to hand;
+  // 2 instead with 2-3 <Sukuna's Finger> in your Outside Area, 3 with 4 or more.
+  reg['JJK-1-048'] = {
+    async onPlay(G, p, unit) {
+      if (!p.front.includes(unit)) return;
+      const f = fingersInSideline(p);
+      const n = f >= 4 ? 3 : f >= 2 ? 2 : 1;
+      const enemy = Engine.opponentOf(p);
+      for (let i = 0; i < n; i++) {
+        const pool = enemy.front.filter(u => u.card.type === 'Character');
+        if (!pool.length) break;
+        // the opponent chooses which of their own characters goes back
+        const uid = await enemy.controller.chooseOwnCharacter(enemy, pool, `${unit.card.name}: เลือก character ของคุณกลับมือ`);
+        const t = pool.find(x => x.uid === uid) || pool[0];
+        await Engine.returnUnitToHand(enemy, t);
+        log(`${unit.card.name}: ${t.card.name} กลับมือ`);
+      }
+    },
+  };
+
+  // 053 Nanami Kento — [On Play] you may move 7 cards from your Outside Area to the Remove Area; if
+  // you did, draw 3. (The conditional [Impact] is evaluated live by the generic keyword evaluator.)
+  reg['JJK-1-053'] = {
+    async onPlay(G, p, unit) {
+      if (p.sideline.length < 7) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ส่ง 7 ใบจาก Outside Area ไป Remove Area เพื่อจั่ว 3?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      p.removal.push(...p.sideline.splice(0, 7));
+      Engine.draw(p, 3);
+      log(`${unit.card.name}: ส่ง 7 ใบไป Remove Area, จั่ว 3 ใบ`);
+    },
+  };
+
+  // 054 Nanami Kento (Raid) — [On Retire] you may mill 2; if you did, rest up to 1 enemy Front Line
+  // character. (Its conditional BP/Damage/Impact are handled by the generic evaluators.)
+  reg['JJK-1-054'] = {
+    async onSideline(G, p, unit, reason) {
+      if (p.deck.length < 2) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ส่งการ์ดบนเด็ค 2 ใบไป Outside Area?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      p.sideline.push(...p.deck.splice(0, 2));
+      p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 2;
+      log(`${unit.card.name}: ส่งการ์ดบนเด็ค 2 ใบไป Outside Area`);
+      await H.restEnemyFront(p);
+    },
+  };
+
+  // 061 Malevolent Shrine (Field) — [Main][Rest] choose 1 <Sukuna>; it gains every tier reached,
+  // based on how many <Sukuna's Finger> sit in your Outside Area.
+  reg['JJK-1-061'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.name || '').includes('Sukuna'));
+      if (!targets.length) { p.controller.notify?.('ไม่มี Sukuna บนสนาม'); return; }
+      unit.rested = true;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Sukuna`);
+      const t = targets.find(x => x.uid === uid);
+      if (!t) return;
+      const f = fingersInSideline(p);
+      const got = [];
+      if (f >= 2) { t.tempDmg = (t.tempDmg || 0) + 1; got.push('[Damage (2)]'); }
+      if (f >= 3) { t.tempSnipe = true; got.push('[Sniper]'); }
+      if (f >= 4) { t.tempImpact = (t.tempImpact || 0) + 1; got.push('[Impact +1]'); }
+      log(got.length ? `${unit.card.name}: ${t.card.name} ได้ ${got.join(' ')} เทิร์นนี้` : `${unit.card.name}: Sukuna's Finger ไม่พอ (มี ${f})`);
+    },
+  };
+
+  // 069 Getou Suguru — [On Play] you may retire 1 other own character. @[Main][When in Frontline]
+  // [1 Per Turn] if a character on your area was retired this turn, your opponent retires 1.
+  reg['JJK-1-069'] = {
+    async onPlay(G, p, unit) {
+      const others = [...p.front, ...p.energy].filter(u => u !== unit && u.card.type === 'Character');
+      if (!others.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, others, `${unit.card.name}: retire character ของคุณ 1 ใบ? (ไม่บังคับ)`, true);
+      const t = others.find(x => x.uid === uid);
+      if (t) await Engine.sidelineUnit(p, t, 'effect');
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (!Engine.G.retiredThisTurn) { p.controller.notify?.('ยังไม่มี character ถูก retire เทิร์นนี้'); return; }
+      unit._usedTurn = Engine.G.turn;
+      const enemy = Engine.opponentOf(p);
+      const pool = [...enemy.front, ...enemy.energy].filter(u => u.card.type === 'Character');
+      if (!pool.length) return;
+      // the opponent chooses which of their own characters to retire
+      const uid = await enemy.controller.chooseOwnCharacter(enemy, pool, `${unit.card.name}: เลือก character ของคุณให้ retire`);
+      const t = pool.find(x => x.uid === uid) || pool[0];
+      await Engine.sidelineUnit(enemy, t, 'effect');
+      log(`${unit.card.name}: ${t.card.name} ถูก retire`);
+    },
+  };
 })();

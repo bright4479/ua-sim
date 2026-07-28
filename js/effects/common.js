@@ -1083,13 +1083,34 @@
       const n = parseInt(m[1]), orLess = /or less/i.test(text);
       return owner => { const l = Engine.opponentOf(owner).life.length; return orLess ? l <= n : l === n; };
     }
-    // "on the same lane" — the other unit must share this one's line
-    if ((m = text.match(/^If there is an? <([^>]+)> on the same lane$/i))) {
-      const name = m[1].trim();
+    // "on the same line/lane" — the other unit must share this one's line (one or two named cards)
+    if ((m = text.match(/^If there is an? <([^>]+)>(?: or an? <([^>]+)>)? (?:on|in) the same l(?:ane|ine)$/i))) {
+      const names = [m[1].trim(), m[2]?.trim()].filter(Boolean);
       return (owner, unit) => {
         const line = owner.front.includes(unit) ? owner.front : owner.energy;
-        return line.some(u => u !== unit && (u.card.name || '').includes(name));
+        return line.some(u => u !== unit && names.some(n => (u.card.name || '').includes(n)));
       };
+    }
+    // "If there is/are N or more <NAME> in your Outside Area" (count of one named card in a zone)
+    if ((m = text.match(/^If there (?:is|are) (\d+) or more <([^>]+)> (?:cards? )?(?:on|in) your (Outside Area|Remove Area)$/i))) {
+      const need = parseInt(m[1]), name = m[2].trim();
+      const zone = /remove/i.test(m[3]) ? 'removal' : 'sideline';
+      return owner => owner[zone].filter(no => (UAData.byNo.get(no)?.name || '').includes(name)).length >= need;
+    }
+    // "If you have N or more generated energy"
+    if ((m = text.match(/^If you have (\d+) or more generated energy$/i))) {
+      const need = parseInt(m[1]);
+      return owner => Object.values(Engine.energyGen(owner)).reduce((a, b) => a + b, 0) >= need;
+    }
+    // "If there are N or more characters on your area with BP M or more"
+    if ((m = text.match(/^If there are (\d+) or more characters on your area with BP (\d+) or more$/i))) {
+      const need = parseInt(m[1]), bpMin = parseInt(m[2]);
+      return owner => [...owner.front, ...owner.energy].filter(u => Engine.bp(u) >= bpMin).length >= need;
+    }
+    // "If there are N or more characters on your opponent's Front Line"
+    if ((m = text.match(/^If there are (\d+) or more characters on your opponent'?s Front Line$/i))) {
+      const need = parseInt(m[1]);
+      return owner => Engine.opponentOf(owner).front.length >= need;
     }
     if (/^If there is a face-down card under this character$/i.test(text)) {
       return (owner, unit) => (unit.counters || []).length >= 1;
@@ -1110,7 +1131,9 @@
       else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
       // "<condition>, this character gains [Impact (2)]" — the keyword must close the clause so
       // that costed or multi-step abilities (which resolve elsewhere) are not swept up here.
-      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]]*?(\d*)\s*\]\.?$/i);
+      // the grant may be compound ("gains +500 BP and [Impact (1)]"); the BP half is handled
+      // separately by the passive-BP evaluator, so only the keyword is taken here
+      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]]*?(\d*)\s*\]\.?$/i);
       if (!m) continue;
       const cond = parseKeywordCondition(m[1].trim());
       if (!cond) continue;
