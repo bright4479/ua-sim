@@ -429,6 +429,29 @@
     [/wins? a battle[^"]*draw/i,                         'ชนะ battle → จั่ว',    u => { u._grantedOnWinDraw = true; }],
     [/attacks[^"]*draw/i,                                'เมื่อโจมตี → จั่ว',     u => { u._grantedAttackDraw = true; }],
   ];
+  // Bracket keywords granted by an activated ability are written unquoted ("[Main] [Discard 2]
+  // [1 Per Turn] this character gains [Impact (1)] during this turn"), so parseKeywords ignores
+  // them as printed keywords and they resolve here onto the temp fields instead.
+  const BRACKET_GRANTS = [
+    [/\[Impact\s*\(?\+?(\d)?\)?\s*\]/i, 'ได้ [Impact]',       (u, n) => { u.tempImpact = (u.tempImpact || 0) + (n || 1); }],
+    [/\[Damage\s*\(?\+?(\d)?\)?\s*\]/i, 'ได้ [Damage]',       (u, n) => { u.tempDmg = (u.tempDmg || 0) + (n && n > 1 ? n - 1 : 1); }],
+    [/\[Double Attack\]/i,              'ได้ [Double Attack]', u => { u.tempDoubleAttack = true; }],
+    [/\[Sniper?\]/i,                    'ได้ [Sniper]',        u => { u.tempSnipe = true; }],
+  ];
+  function matchBracketGrant(fx) {
+    // must actually be a grant, not the card's own printed keyword sitting in the same clause
+    const self = /this character (?:gains?|gets)/i.test(fx);
+    const chosen = /(?:give (?:it|them|that character)|and it (?:gains?|gets))\s*\[/i.test(fx);
+    if (!self && !chosen) return null;
+    for (const [re, label, apply] of BRACKET_GRANTS) {
+      const m = fx.match(re);
+      if (!m) continue;
+      const n = m[1] ? parseInt(m[1]) : null;
+      return { label, apply: u => apply(u, n), scope: chosen && !self ? 'chosen' : 'self' };
+    }
+    return null;
+  }
+
   function parseGrantedAbility(quotedText) {
     for (const [re, label, apply, clear] of GRANTED_ABILITIES) if (re.test(quotedText)) return { label, apply, clear };
     return null;
@@ -1143,6 +1166,20 @@
         return {
           kind: 'grantUnblockable', grant: g,
           chosen: !matchSelfUnblockableGrant(fx),
+          rest: /\[Rest this card\]/i.test(fx),
+          discardN: dis ? parseInt(dis[1]) : 0,
+          oncePerTurn: /\[1 Per Turn\]/i.test(fx),
+        };
+      }
+    }
+    // "[Main] [cost]? [1 Per Turn]? this character gains [Impact (1)] / [Damage (2)] /
+    // [Double Attack] / [Sniper] during this turn." — unquoted bracket-keyword grant
+    {
+      const g = matchBracketGrant(fx);
+      if (g) {
+        const dis = fx.match(/\[Discard (\d+)\]/i);
+        return {
+          kind: 'grantAbility', grant: g,
           rest: /\[Rest this card\]/i.test(fx),
           discardN: dis ? parseInt(dis[1]) : 0,
           oncePerTurn: /\[1 Per Turn\]/i.test(fx),

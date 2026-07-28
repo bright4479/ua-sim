@@ -543,7 +543,14 @@
       unit._usedTurn = Engine.G.turn;
       const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:Houkago Climax Girls`, true);
       const t = targets.find(x => x.uid === uid);
-      if (t) { t.rested = false; t.tempCannotAttack = true; log(`${unit.card.name}: ${t.card.name} Active แต่ไม่สามารถโจมตีเทิร์นนี้`); }
+      if (t) {
+        t.rested = false;
+        t.tempCannotAttack = true;
+        // tempCannotAttack has no End Phase reset, so "during this turn" must be scheduled off
+        // explicitly — otherwise this character could never attack again for the rest of the game.
+        Engine.scheduleDelayedAction(Engine.G.turn + 1, () => { t.tempCannotAttack = false; });
+        log(`${unit.card.name}: ${t.card.name} Active แต่ไม่สามารถโจมตีเทิร์นนี้`);
+      }
     },
   };
 

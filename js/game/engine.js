@@ -14,15 +14,27 @@ const Engine = (() => {
     // something, so the static flags below must be read from the unquoted text only; otherwise the
     // card silently gets the ability permanently and for free (this affected 89 main-set cards).
     // Grants are applied at resolve time through the temp unit fields (tempUnblockableBP, etc.).
-    const fxStatic = fx.replace(/"[^"]*"/g, ' ').replace(/“[^”]*”/g, ' ');
+    // Quotes are stripped per clause, never across the whole string: the data contains unbalanced
+    // quotes, and a stray one would otherwise pair with a quote in a later clause and swallow the
+    // '@[Main]' boundary between them, turning that clause's granted keyword into a printed one.
+    const stripQuotes = s => s.replace(/"[^"]*"/g, ' ').replace(/“[^”]*”/g, ' ');
+    const fxSegs = fx.split('@');
+    const fxStatic = fxSegs.map(stripQuotes).join('@');
+    // Quotes are not the only way an ability gets granted: a keyword printed inside a [Main] clause
+    // is an activated ability with a cost ("[Main] [Discard 2] [1 Per Turn] this character gains
+    // [Impact (1)] during this turn"), so it must not become a printed keyword either — that was
+    // handing 123 keyword instances out permanently and for free. Grants resolve through the temp
+    // fields instead. (A stray leading cost number is a known scrape artifact, skipped before the
+    // anchor.) Raid targets and alternate names are deliberately still read from the full text.
+    const fxPassive = fxSegs.filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s)).map(stripQuotes).join('@');
     const kw = {
-      step: /\[Step\]/i.test(fx),
+      step: /\[Step\]/i.test(fxPassive),
       // the source data spells this keyword "[Sniper]" on 113 cards and "[Snipe]" on only 4 —
       // matching just the latter silently disabled the keyword on almost every card that has it.
-      snipe: /\[Sniper?\]/i.test(fxStatic),
-      doubleAttack: /\[Double Attack\]/i.test(fx),
-      doubleBlock: /\[Double Block\]/i.test(fx),
-      nullifyImpact: /\[(Nullify Impact|Impact Negate|Impact Nagate)\]/i.test(fx), // "Nagate" is a recurring data-entry typo of "Negate"
+      snipe: /\[Sniper?\]/i.test(fxPassive),
+      doubleAttack: /\[Double Attack\]/i.test(fxPassive),
+      doubleBlock: /\[Double Block\]/i.test(fxPassive),
+      nullifyImpact: /\[(Nullify Impact|Impact Negate|Impact Nagate)\]/i.test(fxPassive), // "Nagate" is a recurring data-entry typo of "Negate"
       impact: 0,
       dmg: 1,
       raidTargets: [],
@@ -47,10 +59,10 @@ const Engine = (() => {
       mustBeBlocked: false,       // "Your opponent must block this character's attack if possible." — blocking this attacker is mandatory
       mustBlock: false,           // "This character must block your opponent's attack if possible." — the obligation sits on the defender
     };
-    const im = fxStatic.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
+    const im = fxPassive.match(/\[Impact\s*\(?(\d)\)?\s*\]/i);
     if (im) kw.impact = parseInt(im[1]);
-    else if (/\[Impact\]/i.test(fxStatic)) kw.impact = 1;
-    const dm = fxStatic.match(/\[Damage\s*\(?(\d)\)?\s*\]/i);
+    else if (/\[Impact\]/i.test(fxPassive)) kw.impact = 1;
+    const dm = fxPassive.match(/\[Damage\s*\(?(\d)\)?\s*\]/i);
     if (dm) kw.dmg = parseInt(dm[1]);
     // [Raid] <Name> or [Raid] [Affinity]
     const raidLine = fx.match(/\[Raid\]\s*(<[^>]+>|\[[^\]]+\])/i);
@@ -204,6 +216,7 @@ const Engine = (() => {
       tempUnblockableBPMin: null, // granted "cannot be blocked by characters with BP N or more" this turn
       tempUnblockableNeedMin: null, // granted "cannot be blocked by characters with required energy N or more" (approximated as lasting the rest of the turn, not just "until the end of the attack")
       tempCanAttackFromEnergy: false, // granted "this character can attack from your Energy Line" this turn
+      tempDoubleAttack: false,  // granted [Double Attack] this turn (temp counterpart to kw.doubleAttack)
       tempMustBeBlocked: false, // granted "your opponent must block this character's attack" this turn (temp counterpart to kw.mustBeBlocked)
       tempMustBlock: false,     // granted "this character must block" this turn (temp counterpart to kw.mustBlock)
       _grantedAttackDrawN: null, // granted "[When Attacking] draw up to N cards" this turn (N > 1, sibling of _grantedAttackDraw's flat +1)
@@ -953,7 +966,7 @@ const Engine = (() => {
         }
       }
 
-      if (atk.kw.doubleAttack && atk.attackedThisTurn === 1) {
+      if ((atk.kw.doubleAttack || atk.tempDoubleAttack) && atk.attackedThisTurn === 1) {
         atk.rested = false;
         log(`[Double Attack] ${atk.card.name} กลับเป็น Active`);
       }
@@ -1157,7 +1170,7 @@ const Engine = (() => {
     }
     // expire until-end-of-turn modifiers
     for (const pl of G.players)
-      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedAttackDrawN = null; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; u.tempMustBeBlocked = false; u.tempMustBlock = false; }
+      for (const u of [...pl.front, ...pl.energy]) { u.bpMod = 0; u.tempImpact = 0; u.tempDmg = 0; u.tempGen = 0; u.tempFrontGen = false; u.noBlock = false; u._grantedOnWinDraw = false; u._grantedOnWinActive = false; u._grantedAttackDraw = false; u._grantedAttackDrawN = null; u._grantedUnblockedDraw = false; u.noRetire = false; u.tempSnipe = false; u.tempUnblockableBP = null; u.tempUnblockableBPMin = null; u.tempUnblockableNeedMin = null; u.tempCanAttackFromEnergy = false; u.effectsNullified = false; u.tempUntargetable = false; u.tempRaidable = false; u.tempMustBeBlocked = false; u.tempMustBlock = false; u.tempDoubleAttack = false; }
     p.pendingDiscount = null;
     G._noRemovalByEffectsThisTurn = false;
     update();
