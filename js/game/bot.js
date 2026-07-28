@@ -104,7 +104,7 @@ function makeBotController() {
       ready.sort((a, b) => Engine.bp(b) - Engine.bp(a));
       const atk = ready[0];
       // snipe weakest enemy front character if profitable
-      if (atk.kw.snipe) {
+      if (atk.kw.snipe || atk.tempSnipe || Effects.genericKeywordActive?.(p, atk, 'snipe')) {
         // mirrors the engine's own snipe gate — a pick above the cap would just be rejected there
         const targets = enemy.front.filter(u => Engine.bp(u) <= Engine.bp(atk) &&
           (atk.kw.snipeMaxBP == null || Engine.bp(u) < atk.kw.snipeMaxBP));

@@ -59,7 +59,7 @@ function hasKeywordOnly(c) {
   const kw = Engine.parseKeywords(c);
   return kw.step || kw.snipe || kw.doubleAttack || kw.doubleBlock || kw.nullifyImpact || kw.impact || kw.dmg !== 1 ||
     kw.raidTargets.length || kw.entersActive || kw.entersActiveIf || kw.unblockableBP != null || kw.unblockableBPMin != null || kw.alsoTreatedAs.length ||
-    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || kw.immuneBpReduction || kw.snipeMaxBP != null || kw.mustBeBlocked || kw.mustBlock || PASSIVE_TEXT_RE.test(c.effect || '') || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c);
+    kw.frontGen || kw.untargetable || kw.cannotBlock || kw.cannotAttack || kw.unblockableByRaided || kw.cannotMove || kw.cannotEnterFront || kw.retireToRemoval || kw.raidableByAny || kw.cannotEnterEnergy || kw.cannotMoveToFront || kw.immuneBpReduction || kw.snipeMaxBP != null || kw.mustBeBlocked || kw.mustBlock || PASSIVE_TEXT_RE.test(c.effect || '') || Engine.hasTextCostDiscount?.(c) || Effects.hasGenericFrontGen?.(c) || Effects.hasGenericKeyword?.(c);
 }
 
 // strip every sentence/tag pattern our keyword-only fallback already recognizes as "handled", to
@@ -158,6 +158,28 @@ const rows = Object.entries(bySeries).map(([series, v]) => {
     residualEx: v.keywordOnlyResidual.slice(0, EX_N).map(c => ({ no: c.no, name: c.name, type: c.type, effect: c.effect.replace(/\n/g, ' ') })),
   };
 }).sort((a, b) => a.pct - b.pct);
+
+// `--residual <SERIES>` lists that series' un-scripted bonus text in full, for a scripting pass.
+// It reuses the classification above so it can never disagree with the summary table.
+const residualIdx = process.argv.indexOf('--residual');
+if (residualIdx >= 0) {
+  const want = process.argv[residualIdx + 1];
+  if (want === 'ALL') {                       // every series at once, one line per card
+    for (const [s, v] of Object.entries(bySeries))
+      for (const c of v.keywordOnlyResidual)
+        console.log(`${s}\t${c.no}\t${c.effect.replace(/\s+/g, ' ')}`);
+    process.exit(0);
+  }
+  const row = bySeries[want];
+  if (!row) { console.error(`unknown series: ${want}`); process.exit(1); }
+  console.log(`${want}: ${row.keywordOnlyResidual.length} ใบที่ covered ด้วย keyword แต่ยังมีข้อความที่ไม่ได้ script\n`);
+  for (const c of row.keywordOnlyResidual) {
+    console.log(`${c.no} | ${c.name} | ${c.type}`);
+    console.log('   ' + c.effect.replace(/@/g, '\n   @'));
+    console.log('   ↳ เหลือ script: ' + residualText(c) + '\n');
+  }
+  process.exit(0);
+}
 
 if (process.argv.includes('--json')) {
   console.log(JSON.stringify({ totalAll: cards.length, coveredAll: rows.reduce((s, r) => s + r.covered, 0), rows }, null, 2));

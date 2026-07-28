@@ -26,7 +26,15 @@ const Engine = (() => {
     // handing 123 keyword instances out permanently and for free. Grants resolve through the temp
     // fields instead. (A stray leading cost number is a known scrape artifact, skipped before the
     // anchor.) Raid targets and alternate names are deliberately still read from the full text.
-    const fxPassive = fxSegs.filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s)).map(stripQuotes).join('@');
+    // A clause that gates a keyword behind a board condition ("If there are 4 or more <Trait:X>
+    // cards on your area, this character gains [Impact 1]") is not a printed keyword either — it is
+    // evaluated live by the generic impact/damage evaluator in common.js. Without this the card
+    // would carry the keyword unconditionally AND gain it again whenever the condition held.
+    const isConditionalGrant = s =>
+      /^\s*(?:\[[^\]]*\]\s*)*(?:If|While)\b[^@]*\bthis character (?:gains?|gets)\s*[+\d]*\s*\[/i.test(s);
+    const fxPassive = fxSegs
+      .filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s) && !isConditionalGrant(s))
+      .map(stripQuotes).join('@');
     const kw = {
       step: /\[Step\]/i.test(fxPassive),
       // the source data spells this keyword "[Sniper]" on 113 cards and "[Snipe]" on only 4 —
@@ -836,7 +844,7 @@ const Engine = (() => {
       atk.attackedThisTurn++;
 
       let targetUnit = null;
-      if (decl.targetUid != null && (atk.kw.snipe || atk.tempSnipe)) {
+      if (decl.targetUid != null && (atk.kw.snipe || atk.tempSnipe || Effects.genericKeywordActive?.(p, atk, 'snipe'))) {
         targetUnit = enemy.front.find(u => u.uid === decl.targetUid) || null;
         // "[Snipe] cannot target characters with BP N or more" — the pick is simply rejected and
         // the attack proceeds as a normal (non-sniping) one.
@@ -891,7 +899,7 @@ const Engine = (() => {
               await Effects.onBlock(G, enemy, blocker, atk);
               const beingBlockedHook = Effects.registry[atk.no]?.onBeingBlocked;
               if (beingBlockedHook) await beingBlockedHook(G, p, atk, blocker);
-              if (blocker.kw.doubleBlock && blocker.blockedThisTurn === 1) {
+              if ((blocker.kw.doubleBlock || Effects.genericKeywordActive?.(enemy, blocker, 'doubleBlock')) && blocker.blockedThisTurn === 1) {
                 blocker.rested = false;
                 log(`[Double Block] ${blocker.card.name} กลับเป็น Active`);
               }
@@ -912,9 +920,12 @@ const Engine = (() => {
             await sidelineUnit(enemy, defender, 'battle');
             log(`${defender.card.name} แพ้ battle → Sideline`);
           }
-          const impactBonusHook = Effects.registry[atk.no]?.impactBonus?.(p, atk) || 0;
-          const impact = (atk.kw.nullifiedImpact ? 0 : atk.kw.impact) + (atk.tempImpact || 0) + impactBonusHook;
-          if (impact > 0 && !defender.kw.nullifyImpact) {
+          // per-card hook wins, otherwise the generic text evaluator (conditional "[Impact (N)]")
+          // — `kw.nullifyImpact` belongs to the DEFENDER and is applied on the next line.
+          const impactBonusHook = Effects.registry[atk.no]?.impactBonus?.(p, atk)
+            ?? Effects.genericImpactBonus?.(p, atk) ?? 0;
+          const impact = atk.kw.impact + (atk.tempImpact || 0) + impactBonusHook;
+          if (impact > 0 && !defender.kw.nullifyImpact && !Effects.genericKeywordActive?.(enemy, defender, 'nullifyImpact')) {
             log(`[Impact ${impact}]!`);
             await dealDamage(p, enemy, impact, atk);
             if (G.over) return;
@@ -950,7 +961,8 @@ const Engine = (() => {
       } else {
         // direct damage — [Damage +N] (additive, from a granted/conditional effect) stacks on
         // top of the printed [Damage(N)]/default-1 base, unlike tempDmg which overrides it outright.
-        const dmgBonusHook = Effects.registry[atk.no]?.dmgBonus?.(p, atk) || 0;
+        const dmgBonusHook = Effects.registry[atk.no]?.dmgBonus?.(p, atk)
+          ?? Effects.genericDmgBonus?.(p, atk) ?? 0;
         const dmg = (atk.tempDmg || atk.kw.dmg || 1) + dmgBonusHook;
         await dealDamage(p, enemy, dmg, atk);
         if (G.over) return;
@@ -966,7 +978,7 @@ const Engine = (() => {
         }
       }
 
-      if ((atk.kw.doubleAttack || atk.tempDoubleAttack) && atk.attackedThisTurn === 1) {
+      if ((atk.kw.doubleAttack || atk.tempDoubleAttack || Effects.genericKeywordActive?.(p, atk, 'doubleAttack')) && atk.attackedThisTurn === 1) {
         atk.rested = false;
         log(`[Double Attack] ${atk.card.name} กลับเป็น Active`);
       }

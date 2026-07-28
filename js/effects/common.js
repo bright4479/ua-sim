@@ -1024,6 +1024,143 @@
     };
   }
 
+  // ---------- generic conditional keyword grants ("[Impact]" / "[Damage]" gated on board state) ----------
+  // "If there is a <NAME> on your area, this character gains [Impact (1)]." — the keyword is not
+  // printed unconditionally, so parseKeywords must not set it; instead it is evaluated live here
+  // through the engine's impactBonus / dmgBonus hooks. Roughly 13% of all cards whose bonus text
+  // was previously unscripted are this shape.
+  function parseKeywordCondition(text) {
+    let m;
+    if ((m = text.match(/^If there is an? <([^>]+)> on your area$/i))) {
+      const name = m[1].trim();
+      return (owner, unit) => countMatching(owner, unit, { name }) >= 1;
+    }
+    if ((m = text.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?)(?: with different names)? on your area$/i))) {
+      const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase();
+      return (owner, unit) => countMatching(owner, unit, { trait, other }) >= need;
+    }
+    if ((m = text.match(/^If there are (\d+) or more (other )?<([^>]+)> (?:cards?|characters?) on your area$/i))) {
+      const need = parseInt(m[1]), other = !!m[2], name = m[3].trim();
+      return (owner, unit) => countMatching(owner, unit, { name, other }) >= need;
+    }
+    // BP threshold on this character — the data phrases it four different ways
+    if ((m = text.match(/^If this character(?:'?s)?(?: have| has)? BP\s*(\d+) or (?:more|higher)(?: BP)?$/i)) ||
+        (m = text.match(/^If this character'?s BP is (\d+) or (?:more|higher)(?: BP)?$/i)) ||
+        (m = text.match(/^If this character has (\d+) or (?:more|higher) BP$/i))) {
+      const need = parseInt(m[1]);
+      return (owner, unit) => Engine.bp(unit) >= need;
+    }
+    if ((m = text.match(/^If this character'?s required energy is (\d+) or (?:more|higher)$/i))) {
+      const need = parseInt(m[1]);
+      return (owner, unit) => (unit.card.need || 0) >= need;
+    }
+    if ((m = text.match(/^If you have (\d+) or (more|less) cards? in your (hand|deck|Outside Area|Remove Area)$/i))) {
+      const n = parseInt(m[1]), more = m[2].toLowerCase() === 'more';
+      const zone = { hand: 'hand', deck: 'deck', 'outside area': 'sideline', 'remove area': 'removal' }[m[3].toLowerCase()];
+      return owner => (more ? owner[zone].length >= n : owner[zone].length <= n);
+    }
+    // counts of named/trait cards sitting in the Outside or Remove Area
+    if ((m = text.match(/^If there are (\d+) or more (?:<Trait:?\s*([^>]+)>|<([^>]+)>) cards?(?: with different names)? (?:on|in) your (Outside Area|Remove Area)$/i))) {
+      const need = parseInt(m[1]), trait = m[2]?.trim().toLowerCase(), name = m[3]?.trim();
+      const zone = /remove/i.test(m[4]) ? 'removal' : 'sideline';
+      const distinct = /different names/i.test(text);
+      return owner => {
+        const hits = owner[zone].map(no => UAData.byNo.get(no)).filter(c =>
+          c && (trait ? (c.traits || '').toLowerCase().includes(trait) : (c.name || '').includes(name)));
+        return (distinct ? new Set(hits.map(c => c.name)).size : hits.length) >= need;
+      };
+    }
+    if ((m = text.match(/^If there are (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
+      const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
+      return owner => owner[zone].length >= need;
+    }
+    // Life thresholds, on either side
+    if ((m = text.match(/^If your Life is (\d+) or less$/i))) {
+      const n = parseInt(m[1]);
+      return owner => owner.life.length <= n;
+    }
+    if ((m = text.match(/^If your opponent'?s Life is (\d+)(?: or less)?$/i))) {
+      const n = parseInt(m[1]), orLess = /or less/i.test(text);
+      return owner => { const l = Engine.opponentOf(owner).life.length; return orLess ? l <= n : l === n; };
+    }
+    // "on the same lane" — the other unit must share this one's line
+    if ((m = text.match(/^If there is an? <([^>]+)> on the same lane$/i))) {
+      const name = m[1].trim();
+      return (owner, unit) => {
+        const line = owner.front.includes(unit) ? owner.front : owner.energy;
+        return line.some(u => u !== unit && (u.card.name || '').includes(name));
+      };
+    }
+    if (/^If there is a face-down card under this character$/i.test(text)) {
+      return (owner, unit) => (unit.counters || []).length >= 1;
+    }
+    if ((m = text.match(/^While you have <([^>]+)> in your Outside Area$/i))) {
+      const name = m[1].trim();
+      return owner => owner.sideline.some(no => (UAData.byNo.get(no)?.name || '').includes(name));
+    }
+    return null;
+  }
+
+  const kwEvalCache = new Map();
+  function buildKeywordEvaluator(card) {
+    const rules = [];
+    for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
+      let when = 'always', rest = clause, m;
+      if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
+      else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
+      // "<condition>, this character gains [Impact (2)]" — the keyword must close the clause so
+      // that costed or multi-step abilities (which resolve elsewhere) are not swept up here.
+      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]]*?(\d*)\s*\]\.?$/i);
+      if (!m) continue;
+      const cond = parseKeywordCondition(m[1].trim());
+      if (!cond) continue;
+      const raw = m[2].toLowerCase();
+      const n = m[3] ? parseInt(m[3]) : 1;
+      // [Impact]/[Damage] are numeric bonuses; the rest are flags the engine reads as booleans.
+      // [Damage (2)] means the attack deals 2 rather than the default 1, so the bonus is n-1.
+      if (raw === 'impact') rules.push({ when, cond, kind: 'impact', amount: n });
+      else if (raw === 'damage') rules.push({ when, cond, kind: 'damage', amount: Math.max(1, n) - 1 });
+      else if (raw.startsWith('snipe')) rules.push({ when, cond, kind: 'snipe', flag: true });
+      else if (raw === 'double attack') rules.push({ when, cond, kind: 'doubleAttack', flag: true });
+      else if (raw === 'double block') rules.push({ when, cond, kind: 'doubleBlock', flag: true });
+      else rules.push({ when, cond, kind: 'nullifyImpact', flag: true });
+    }
+    return rules.length ? rules : null;
+  }
+  function keywordBonus(owner, unit, kind) {
+    if (unit.effectsNullified) return 0;
+    if (!kwEvalCache.has(unit.no)) kwEvalCache.set(unit.no, buildKeywordEvaluator(unit.card));
+    const rules = kwEvalCache.get(unit.no);
+    if (!rules) return 0;
+    const mine = Engine.G.players[Engine.G.active] === owner;
+    let total = 0;
+    for (const r of rules) {
+      if (r.kind !== kind) continue;
+      if (r.when === 'my' && !mine) continue;
+      if (r.when === 'opp' && mine) continue;
+      if (r.cond(owner, unit)) total += (r.amount || 0);
+    }
+    return total;
+  }
+  // boolean counterpart, for the keywords the engine reads as flags rather than numbers
+  function keywordActive(owner, unit, kind) {
+    if (!owner || unit.effectsNullified) return false;
+    if (!kwEvalCache.has(unit.no)) kwEvalCache.set(unit.no, buildKeywordEvaluator(unit.card));
+    const rules = kwEvalCache.get(unit.no);
+    if (!rules) return false;
+    const mine = Engine.G.players[Engine.G.active] === owner;
+    return rules.some(r => r.kind === kind && r.flag &&
+      !(r.when === 'my' && !mine) && !(r.when === 'opp' && mine) && r.cond(owner, unit));
+  }
+  Effects.genericImpactBonus = (owner, unit) => keywordBonus(owner, unit, 'impact');
+  Effects.genericDmgBonus = (owner, unit) => keywordBonus(owner, unit, 'damage');
+  Effects.genericKeywordActive = keywordActive;
+  // introspection for the coverage tools
+  Effects.hasGenericKeyword = function (card) {
+    if (!kwEvalCache.has(card.no)) kwEvalCache.set(card.no, buildKeywordEvaluator(card));
+    return !!kwEvalCache.get(card.no);
+  };
+
   Effects.genericBpBonus = function (owner, unit) {
     if (!bpEvalCache.has(unit.no)) bpEvalCache.set(unit.no, buildBpEvaluator(unit.card));
     const f = bpEvalCache.get(unit.no);
