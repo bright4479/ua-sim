@@ -930,4 +930,104 @@
   // BLC-1-026: pure Raid-material eligibility declaration, no discrete runtime action.
   // BLC-2-013 / BLC-2-047: "when this card is placed to Outside Area by a specific other card's
   //   effect" reactive — no hook tracks which card's effect caused a given discard.
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  // 004 As Nodt — [Main][Frontline][1 Per Turn] rest an enemy Front Line character with BP 3000 or less.
+  reg['BLC-1-004'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      unit._usedTurn = Engine.G.turn;
+      await H.restEnemyFront(p, 3000);
+    },
+  };
+
+  // 014 Bambietta Basterbine — [On Play] retire an already-rested enemy Front Line character.
+  reg['BLC-1-014'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const pool = enemy.front.filter(u => u.card.type === 'Character' && u.rested && !u.kw.untargetable && !u.tempUntargetable);
+      if (!pool.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรูที่นอนอยู่`, true);
+      const t = pool.find(x => x.uid === uid);
+      if (t) { await Engine.sidelineUnit(enemy, t, 'effect'); log(`${unit.card.name}: ${t.card.name} ถูก retire`); }
+    },
+  };
+
+  // 024 Yhwach — [On Play] choose 1: strip the top card off an enemy Raid-state character, or
+  // retire an enemy Front Line character with BP 3000 or less. (Its conditional BP/[Damage] rides
+  // on "2 or more characters left the area this turn", which no counter tracks — left unhandled.)
+  reg['BLC-1-024'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'ยกเลิกชั้นบนของ Raid State ศัตรู', value: 'a' },
+        { label: 'Retire ศัตรู BP 3000 หรือน้อยกว่า', value: 'b' },
+      ]);
+      if (v === 'a') {
+        const pool = enemy.front.filter(u => u.under.length);
+        if (!pool.length) return;
+        const uid = await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรูใน Raid State`, true);
+        const t = pool.find(x => x.uid === uid);
+        if (t) await H.unraidTopLayer(enemy, t);
+      } else await H.retireEnemyFront(p, 3000);
+    },
+  };
+
+  // 041 Kurosaki Ichigo — [On Play] mill 2, then you may move any number of cards from your Outside
+  // Area to the Remove Area; an enemy Front Line character gets -500 BP per card moved.
+  reg['BLC-1-041'] = {
+    async onPlay(G, p, unit) {
+      const milled = Math.min(2, p.deck.length);
+      if (milled) {
+        p.sideline.push(...p.deck.splice(0, milled));
+        p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + milled;
+        log(`${unit.card.name}: ส่งการ์ดบนเด็ค ${milled} ใบไป Outside Area`);
+      }
+      if (!p.sideline.length) return;
+      const max = p.sideline.length;
+      const opts = [];
+      for (let n = 0; n <= Math.min(max, 5); n++) opts.push({ label: `${n} ใบ`, value: n });
+      const n = await p.controller.chooseOption(p, `${unit.card.name}: ส่งกี่ใบจาก Outside Area ไป Remove Area? (-500 BP ต่อใบ)`, opts);
+      if (!n) return;
+      p.removal.push(...p.sideline.splice(0, n));
+      log(`${unit.card.name}: ส่ง ${n} ใบไป Remove Area`);
+      await H.debuffEnemyFront(p, -500 * n);
+    },
+  };
+
+  // 078 Komamura Sajin — [When Attacking] a <Trait: Gotei 13> card on your area gets +500 BP.
+  reg['BLC-1-078'] = {
+    async onAttack(G, p, unit) {
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Gotei 13'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:Gotei 13`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.bpMod += 500; log(`${unit.card.name}: ${t.card.name} +500 BP เทิร์นนี้`); }
+    },
+  };
+
+  // 085 Toshiro Hitsugaya — [On Play] rest an enemy Front Line character and keep it down through
+  // their next Attack Phase; with 6+ other <Trait: Gotei 13> on your area, also rest their whole
+  // Energy Line.
+  reg['BLC-1-085'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const t = await H.restEnemyFront(p);
+      if (t) t.skipNextStand = true;
+      const gotei = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').includes('Gotei 13')).length;
+      if (gotei < 6) return;
+      for (const u of enemy.energy) { u.rested = true; u.skipNextStand = true; }
+      log(`${unit.card.name}: ศัตรูบน Energy Line ทั้งหมดถูกวางนอน`);
+    },
+  };
+
+  // 091 Yamamoto Shigekuni — passive: +1000 BP while it stands alone on your Front Line.
+  reg['BLC-1-091'] = {
+    bpBonus(p, unit) { return p.front.includes(unit) && p.front.length === 1 ? 1000 : 0; },
+  };
+
+  // 092 Genryusai Shigekuni Yamamoto — a character that loses a battle to this one goes to the
+  // Remove Area instead of the Outside Area.
+  reg['BLC-1-092'] = { onWinBattle: H.battleLoserGoesTo('removal') };
 })();

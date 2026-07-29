@@ -688,25 +688,6 @@
   };
 
   // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
-  // "the opponent's character that battled with this character and lost goes <somewhere> instead
-  // of being retired" — onWinBattle returns true to take over the loser's fate entirely.
-  function battleLoserGoesTo(dest) {
-    return async function (G, p, atk, enemy, defender) {
-      if (!defender) return false;
-      for (const line of [enemy.front, enemy.energy]) {
-        const i = line.indexOf(defender);
-        if (i >= 0) line.splice(i, 1);
-      }
-      for (const c of defender.under) enemy.sideline.push(c);
-      defender.under = [];
-      if (defender.counters.length) { enemy.sideline.push(...defender.counters); defender.counters = []; }
-      if (dest === 'hand') enemy.hand.push(defender.no); else enemy[dest].push(defender.no);
-      await Effects.onLeaveField(G, enemy, defender);
-      log(`${defender.card.name} แพ้ battle → ${dest === 'hand' ? 'กลับมือ' : dest === 'removal' ? 'Remove Area' : 'Outside Area'}`);
-      return true;
-    };
-  }
-
   // plays the card sitting under a Raid-state unit, keeping the raider on the field
   async function playRaidSourceCard(p, unit, { active = true, line = 'front' } = {}) {
     if (!unit.under.length) return null;
@@ -718,12 +699,12 @@
   }
 
   // 007 Gentle Criminal — a character that loses a battle to this one goes back to hand.
-  reg['MHA-1-007'] = { onWinBattle: battleLoserGoesTo('hand') };
+  reg['MHA-1-007'] = { onWinBattle: H.battleLoserGoesTo('hand') };
 
   // 010 Shigaraki Tomura — the battle loser goes to the Remove Area. @[Main][Frontline][1 Per Turn]
   // send an enemy Front Line character with BP 2000 or less to the Remove Area.
   reg['MHA-1-010'] = {
-    onWinBattle: battleLoserGoesTo('removal'),
+    onWinBattle: H.battleLoserGoesTo('removal'),
     async onMain(G, p, unit) {
       if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
       if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }

@@ -633,7 +633,26 @@
     log(`${owner.name}: ${unit.card.name} ถูกส่งไป Outside Area เผย ${newUnit.card.name}`);
     return newUnit;
   }
-  Object.assign(window.UAEffectHelpers, { bounceEnemyFront, unraidTopLayer });
+  // "the opponent's character that battled with this character and lost goes <somewhere> instead
+  // of being retired" — onWinBattle returns true to take over the loser's fate entirely.
+  function battleLoserGoesTo(dest) {
+    return async function (G, p, atk, enemy, defender) {
+      if (!defender) return false;
+      for (const line of [enemy.front, enemy.energy]) {
+        const i = line.indexOf(defender);
+        if (i >= 0) line.splice(i, 1);
+      }
+      for (const c of defender.under) enemy.sideline.push(c);
+      defender.under = [];
+      if (defender.counters.length) { enemy.sideline.push(...defender.counters); defender.counters = []; }
+      if (dest === 'hand') enemy.hand.push(defender.no); else enemy[dest].push(defender.no);
+      await Effects.onLeaveField(G, enemy, defender);
+      log(`${defender.card.name} แพ้ battle → ${dest === 'hand' ? 'กลับมือ' : dest === 'removal' ? 'Remove Area' : 'Outside Area'}`);
+      return true;
+    };
+  }
+
+  Object.assign(window.UAEffectHelpers, { bounceEnemyFront, unraidTopLayer, battleLoserGoesTo });
 
   const origOnPlay = Effects.onPlay.bind(Effects);
   async function dispatchOnPlay(G, p, unit) {
