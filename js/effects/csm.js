@@ -354,4 +354,115 @@
       Engine.draw(p, n); log(`${card.name}: จั่ว ${n} ใบ`);
     },
   };
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  const eventsUsed = p => p._eventsUsedThisTurn || 0;
+  const hasNamed = (p, n) => [...p.front, ...p.energy].some(u => (u.card.name || '').includes(n));
+  const plainEvent = c => c && c.type === 'Event' && c.trigger !== 'Special' && c.trigger !== 'Final';
+
+  // 007 Denji — [Main][1 Per Turn] with 2+ Event cards used this turn and a <Makima> on your area,
+  // set this character to active.
+  reg['UA53BT-CSM-1-007'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (eventsUsed(p) < 2 || !hasNamed(p, 'Makima')) { p.controller.notify?.('เงื่อนไขไม่ครบ'); return; }
+      unit._usedTurn = Engine.G.turn;
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น Active`);
+    },
+  };
+
+  // 023 Makima — two [Main][Frontline][1 Per Turn] abilities, offered as a choice since a unit has
+  // a single activation entry point: fetch a plain Event card, or buff another character.
+  reg['UA53BT-CSM-1-023'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      const canBuff = eventsUsed(p) >= 1;
+      const opts = [{ label: 'ดึง Event Card จาก Outside Area', value: 'a' }];
+      if (canBuff) opts.push({ label: 'character อื่น +1000 BP', value: 'b' });
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, opts);
+      if (v == null) return;
+      unit._usedTurn = Engine.G.turn;
+      if (v === 'a') await H.fetchFromSideline(p, plainEvent, `${unit.card.name}: เลือก Event Card จาก Outside Area`);
+      else await H.buffOwnCharacter(p, 1000, { excludeUnit: unit });
+    },
+  };
+
+  // 024 Makima (Raid) — [On Play] the next plain Event card you use this turn costs 1 less AP, then
+  // choose to draw 1 or give another character +2000 BP.
+  reg['UA53BT-CSM-1-024'] = {
+    async onPlay(G, p, unit) {
+      p.pendingDiscount = { predicate: plainEvent, apDelta: -1 };
+      log(`${unit.card.name}: Event Card ใบถัดไป ลด AP cost 1`);
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'จั่ว 1 ใบ', value: 'a' }, { label: 'character อื่น +2000 BP', value: 'b' },
+      ]);
+      if (v === 'a') { Engine.draw(p, 1); log(`${unit.card.name}: จั่ว 1 ใบ`); }
+      else await H.buffOwnCharacter(p, 2000, { excludeUnit: unit });
+    },
+  };
+
+  // 031 Reze — [On Play] draw 1, then choose: an enemy Front Line character gets -1000 BP, or (on
+  // your turn, once, after a <Denji> of yours was retired) untap 1 AP.
+  reg['UA53BT-CSM-1-031'] = {
+    async onPlay(G, p, unit) {
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      const opts = [{ label: 'ศัตรู -1000 BP', value: 'a' }];
+      if (Engine.G.players[Engine.G.active] === p && Engine.G.retiredThisTurn) opts.push({ label: 'AP กลับมา Active 1 ใบ', value: 'b' });
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, opts);
+      if (v === 'b') await H.apUntap(p, 1);
+      else await H.debuffEnemyFront(p, -1000);
+    },
+  };
+
+  // 042 Kishibe — [Main][Frontline][1 Per Turn] up to 2 other characters get +1000 BP.
+  reg['UA53BT-CSM-1-042'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      unit._usedTurn = Engine.G.turn;
+      const picked = new Set();
+      for (let i = 0; i < 2; i++) {
+        const pool = [...p.front, ...p.energy].filter(u => u !== unit && u.card.type === 'Character' && !picked.has(u.uid));
+        if (!pool.length) break;
+        const uid = await p.controller.chooseOwnCharacter(p, pool, `${unit.card.name}: เลือก character (${i + 1}/2)`, true);
+        if (uid == null) break;
+        const t = pool.find(x => x.uid === uid);
+        if (!t) break;
+        picked.add(t.uid);
+        t.bpMod += 1000;
+        log(`${unit.card.name}: ${t.card.name} +1000 BP เทิร์นนี้`);
+      }
+    },
+  };
+
+  // 047 Chainsaw Man — [On Retire] choose: draw 2, or (with a face-down card under it) return this
+  // card to your Front Line active.
+  reg['UA53BT-CSM-1-047'] = {
+    // counters are dumped to the Outside Area before onSideline runs, so the face-down check has
+    // to be taken here, while they are still attached
+    async onBeforeLeaveCounters(G, p, unit, reason) {
+      unit._hadFacedown = unit.counters.length > 0;
+      return false; // let the engine dump them as usual
+    },
+    async onSideline(G, p, unit, reason) {
+      const canReplay = unit._hadFacedown && p.front.length < 4;
+      const opts = [{ label: 'จั่ว 2 ใบ', value: 'a' }];
+      if (canReplay) opts.push({ label: 'ลงการ์ดใบนี้กลับ Front Line (active)', value: 'b' });
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, opts);
+      if (v === 'b') {
+        const i = p.sideline.lastIndexOf(unit.no);
+        if (i >= 0) {
+          p.sideline.splice(i, 1);
+          p.deck.unshift(unit.no);
+          await Engine.playCardFromZone(p, unit.no, 'deck', { line: 'front', active: true });
+          return;
+        }
+      }
+      Engine.draw(p, 2);
+      log(`${unit.card.name}: จั่ว 2 ใบ`);
+    },
+  };
 })();
