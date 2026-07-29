@@ -186,6 +186,33 @@ const GameUI = (() => {
     if (!name) return;
     showPhaseBanner(name, active.isBot ? `เทิร์นของ ${active.name}` : 'เทิร์นของคุณ');
   }
+  // Every engine log line is a finished, human-readable sentence, so the feed just surfaces them
+  // as they happen. Without this the player has no way to tell an effect fired at all — the log
+  // panel is opt-in and used to be the only place these ever appeared.
+  const TOAST_MAX = 4;         // keep the stack short; a bot turn can emit a burst
+  const TOAST_MS = 2600;
+  // board-changing effects, as opposed to routine bookkeeping like drawing for turn
+  const TOAST_HOT = /\[Impact|\[Sniper|\[Damage|\[Double|Trigger|BP|retire|Retire|บล็อก|ถูกวางนอน|กลับมือ|ตั้งขึ้น|Remove Area/;
+  function showEventToast(msg) {
+    if (!msg) return;
+    let box = document.getElementById('gb-toasts');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'gb-toasts';
+      box.className = 'gb-toasts';
+      document.body.appendChild(box);
+    }
+    const el = document.createElement('div');
+    el.className = 'gb-toast' + (TOAST_HOT.test(msg) ? ' hot' : '');
+    el.textContent = msg;
+    box.appendChild(el);
+    while (box.children.length > TOAST_MAX) box.firstChild.remove();
+    setTimeout(() => {
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 320);
+    }, TOAST_MS);
+  }
+
   function showPhaseBanner(text, sub) {
     document.querySelectorAll('.phase-banner').forEach(el => el.remove());
     const el = document.createElement('div');
@@ -196,10 +223,46 @@ const GameUI = (() => {
     setTimeout(() => el.remove(), 1350);
   }
 
-  function unitHtml(u, mine) {
+  // Status badges. These show the EFFECTIVE state, so they include keywords granted for the turn
+  // and ones whose printed condition is currently met — that is the whole point for the player:
+  // if a badge is showing, the engine will act on it this turn.
+  function keywordBadges(u, owner) {
+    const kw = u.kw || {};
+    const live = (kind) => Effects.genericKeywordActive?.(owner, u, kind) || false;
+    const out = [];
+    const add = (label, granted, title) => out.push(
+      `<span class="kwb${granted ? ' granted' : ''}" title="${title}">${label}</span>`);
+
+    const impact = (kw.impact || 0) + (u.tempImpact || 0) + (Effects.genericImpactBonus?.(owner, u) || 0);
+    if (impact > 0) add(`⚡${impact}`, !kw.impact, `Impact ${impact} — ทะลุเข้า Life เมื่อชนะ battle`);
+
+    const dmg = (u.tempDmg || kw.dmg || 1) + (Effects.genericDmgBonus?.(owner, u) || 0);
+    if (dmg > 1) add(`✖${dmg}`, !(kw.dmg > 1), `Damage ${dmg} — โจมตีไม่ถูกบล็อกเสีย Life ${dmg}`);
+
+    if (kw.snipe || u.tempSnipe || live('snipe')) add('🎯', !kw.snipe, 'Sniper — เลือกโจมตี character ศัตรูได้โดยตรง');
+    if (kw.doubleAttack || u.tempDoubleAttack || live('doubleAttack')) add('⚔²', !kw.doubleAttack, 'Double Attack — โจมตีได้ 2 ครั้ง');
+    if (kw.doubleBlock || live('doubleBlock')) add('🛡²', !kw.doubleBlock, 'Double Block — บล็อกได้ 2 ครั้ง');
+    if (kw.nullifyImpact || live('nullifyImpact')) add('Ø', !kw.nullifyImpact, 'Impact Negate — กัน Impact ของศัตรู');
+    if (kw.step) add('↷', false, 'Step — ย้ายขึ้น Front Line ได้อิสระ');
+
+    if (kw.unblockableBP != null || kw.unblockableBPMin != null || u.tempUnblockableBP != null ||
+        u.tempUnblockableBPMin != null || u.tempUnblockableNeedMin != null)
+      add('⇢', !(kw.unblockableBP != null || kw.unblockableBPMin != null), 'บล็อกได้ยาก — จำกัดว่าใครบล็อกได้');
+    if (kw.untargetable || u.tempUntargetable) add('🔒', !kw.untargetable, 'ไม่ถูกเลือกเป็นเป้าหมายโดยเอฟเฟกต์ศัตรู');
+    if (kw.mustBeBlocked || u.tempMustBeBlocked) add('❗', !kw.mustBeBlocked, 'ศัตรูต้องบล็อกการโจมตีนี้');
+    if (kw.mustBlock || u.tempMustBlock) add('🛑', !kw.mustBlock, 'character นี้ต้องบล็อก');
+    if (kw.cannotAttack || u.tempCannotAttack) add('🚫⚔', !kw.cannotAttack, 'โจมตีไม่ได้');
+    if (kw.cannotBlock || u.tempCannotBlock) add('🚫🛡', !kw.cannotBlock, 'บล็อกไม่ได้');
+    if (u.skipNextStand) add('💤', true, 'ครั้งถัดไปจะไม่ลุกขึ้น');
+
+    return out.length ? `<div class="kwbadges">${out.join('')}</div>` : '';
+  }
+
+  function unitHtml(u, mine, owner) {
     return `<div class="unit ${u.rested ? 'rested' : ''} ${mine ? 'mine' : 'foe'}"
         draggable="${mine}" data-uid="${u.uid}" data-mine="${mine ? 1 : 0}">
       ${UAData.imgTag(u.card)}
+      ${keywordBadges(u, owner)}
       <div class="unit-bp">${u.card.bp != null ? Engine.bp(u) : ''}${(u.bpMod || u.bpPersist) ? `<span class="bpmod">${(u.bpMod + u.bpPersist) > 0 ? '+' : ''}${u.bpMod + u.bpPersist}</span>` : ''}${u.under.length ? `<span class="raidn">⚡${u.under.length}</span>` : ''}${u.counters.length ? `<span class="raidn">●${u.counters.length}</span>` : ''}</div>
     </div>`;
   }
@@ -209,7 +272,7 @@ const GameUI = (() => {
     const units = lineName === 'front' ? p.front : p.energy;
     let slots = '';
     for (let i = 0; i < 4; i++) {
-      slots += `<div class="cardslot">${units[i] ? unitHtml(units[i], mine) : ''}</div>`;
+      slots += `<div class="cardslot">${units[i] ? unitHtml(units[i], mine, p) : ''}</div>`;
     }
     return `<div class="line-zone ${lineName}" data-owner="${mine ? 'me' : 'foe'}" data-line="${lineName}">
       <span class="zone-tag">${lineName === 'front' ? 'FRONT LINE' : 'ENERGY LINE'}</span>${slots}</div>`;
@@ -634,7 +697,7 @@ const GameUI = (() => {
   // ---------- start ----------
   async function start(playerDeck, botDeck, botName) {
     Engine.G.onUpdate = render;
-    Engine.G.onLog = () => {};
+    Engine.G.onLog = showEventToast;
     await Engine.startGame(playerDeck, botDeck, humanController, makeBotController(), 'คุณ', botName);
   }
 

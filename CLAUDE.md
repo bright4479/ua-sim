@@ -121,6 +121,16 @@ Fan-made web simulator สำหรับเกมการ์ด UNION ARENA �
 4. **ก่อน commit ทุกครั้ง**: `node tools/stress-test-all-series.mjs` ต้องได้ `0 fail` (บอทชนบอท 1 เกม/series ทั้ง 55 series)
 5. commit + push ขึ้น main → Pages deploy เอง (~1-2 นาที)
 
+## UI feedback (2026-07-26 — ผู้ใช้ขอ ก่อนไล่ residual ต่อ)
+
+ผู้ใช้รายงานว่า "effect เหมือนไม่ทำงาน" — ตรวจแล้วพบว่า**ส่วนใหญ่ทำงานอยู่แล้ว แต่มองไม่เห็น**:
+- `ui.js` เคยตั้ง `Engine.G.onLog = () => {}` → **ทิ้ง log ทุกบรรทัด** และ log panel (`gb-log`) ก็ `hidden` โดย default (เปิดด้วยปุ่ม 📜) — ผู้เล่นเลยไม่เห็นอะไรเลยเวลา effect ยิง
+- **แก้แล้ว**: ต่อ `onLog` เข้า `showEventToast()` — feed ลอยกลางบน แสดง log สดทีละบรรทัด (สูงสุด 4 อัน, หายใน 2.6 วิ) · บรรทัดที่เปลี่ยนสถานะกระดาน (Impact/Trigger/BP/retire/บล็อก ฯลฯ) ใช้สไตล์ `.hot` เด่นกว่า
+- **badge keyword บนการ์ด** (`keywordBadges()` ใน `unitHtml`): ⚡Impact ✖Damage 🎯Sniper ⚔²DoubleAttack 🛡²DoubleBlock ØImpactNegate ↷Step ⇢unblockable 🔒untargetable ❗mustBeBlocked 🛑mustBlock 🚫⚔/🚫🛡 cannotAttack/Block 💤skipNextStand
+  - แสดง**สถานะที่มีผลจริงตอนนี้** = printed keyword + temp/granted + **conditional ที่เงื่อนไขผ่านแล้ว** (เรียก `Effects.genericImpactBonus`/`genericDmgBonus`/`genericKeywordActive`) — ถ้า badge ขึ้น แปลว่า engine จะใช้จริงเทิร์นนี้
+  - ตัวที่ได้มาชั่วคราว/จากเงื่อนไข ใช้สี `.granted` (ส้ม) แยกจาก printed (ดำ) เพื่อให้ debug ได้ว่า grant ทำงานไหม
+  - ทดสอบผ่าน browser จริง: การ์ดที่มี [Impact 1] printed + grant temp อีก 1 → แสดง `⚡2` และ badge ที่ granted ติดสีส้มถูกตัว · 7 badges กินพื้นที่การ์ด 22% (ปรับ padding/font ลงจาก 42%)
+
 ## ⚠️ กับดักสำคัญ (เคยพลาดมาแล้ว)
 
 - **"Outside Area" ในข้อความการ์ด = โซน Sideline (`p.sideline`) ไม่ใช่ Removal Area!**
