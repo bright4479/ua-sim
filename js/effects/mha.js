@@ -686,4 +686,113 @@
       return true;
     },
   };
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  // "the opponent's character that battled with this character and lost goes <somewhere> instead
+  // of being retired" — onWinBattle returns true to take over the loser's fate entirely.
+  function battleLoserGoesTo(dest) {
+    return async function (G, p, atk, enemy, defender) {
+      if (!defender) return false;
+      for (const line of [enemy.front, enemy.energy]) {
+        const i = line.indexOf(defender);
+        if (i >= 0) line.splice(i, 1);
+      }
+      for (const c of defender.under) enemy.sideline.push(c);
+      defender.under = [];
+      if (defender.counters.length) { enemy.sideline.push(...defender.counters); defender.counters = []; }
+      if (dest === 'hand') enemy.hand.push(defender.no); else enemy[dest].push(defender.no);
+      await Effects.onLeaveField(G, enemy, defender);
+      log(`${defender.card.name} แพ้ battle → ${dest === 'hand' ? 'กลับมือ' : dest === 'removal' ? 'Remove Area' : 'Outside Area'}`);
+      return true;
+    };
+  }
+
+  // plays the card sitting under a Raid-state unit, keeping the raider on the field
+  async function playRaidSourceCard(p, unit, { active = true, line = 'front' } = {}) {
+    if (!unit.under.length) return null;
+    const dest = line === 'front' ? p.front : p.energy;
+    if (dest.length >= 4) return null;
+    const no = unit.under.shift();
+    p.deck.unshift(no); // playCardFromZone splices it back out itself
+    return Engine.playCardFromZone(p, no, 'deck', { line, active });
+  }
+
+  // 007 Gentle Criminal — a character that loses a battle to this one goes back to hand.
+  reg['MHA-1-007'] = { onWinBattle: battleLoserGoesTo('hand') };
+
+  // 010 Shigaraki Tomura — the battle loser goes to the Remove Area. @[Main][Frontline][1 Per Turn]
+  // send an enemy Front Line character with BP 2000 or less to the Remove Area.
+  reg['MHA-1-010'] = {
+    onWinBattle: battleLoserGoesTo('removal'),
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      const enemy = Engine.opponentOf(p);
+      const pool = enemy.front.filter(u => u.card.type === 'Character' && Engine.bp(u) <= 2000 && !u.kw.untargetable && !u.tempUntargetable);
+      if (!pool.length) { p.controller.notify?.('ไม่มีเป้าหมาย'); return; }
+      unit._usedTurn = Engine.G.turn;
+      const uid = await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรู (BP 2000 หรือน้อยกว่า)`, true);
+      const t = pool.find(x => x.uid === uid);
+      if (!t) return;
+      await Engine.sidelineUnit(enemy, t, 'effect');
+      const i = enemy.sideline.lastIndexOf(t.no);
+      if (i >= 0) { enemy.sideline.splice(i, 1); enemy.removal.push(t.no); }
+      log(`${unit.card.name}: ${t.card.name} ไป Remove Area`);
+    },
+  };
+
+  // 017 Twice — [On Play] you may play the card under this one (its Raid source) active.
+  reg['MHA-1-017'] = {
+    async onPlay(G, p, unit) {
+      if (!unit.under.length || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ลงการ์ดใต้ Raid State ลงสนาม (active)?`,
+        [{ label: 'ลง', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await playRaidSourceCard(p, unit, { active: true });
+    },
+  };
+
+  // 026 Overhaul — [On Play] you may mill 3; if you did, fetch a <Trait: Shie Hassaikai> character
+  // other than <Overhaul>, or an <Eri>, from your Outside Area.
+  reg['MHA-1-026'] = {
+    async onPlay(G, p, unit) {
+      if (p.deck.length < 3) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ส่งการ์ดบนเด็ค 3 ใบไป Outside Area?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      p.sideline.push(...p.deck.splice(0, 3));
+      p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 3;
+      log(`${unit.card.name}: ส่งการ์ดบนเด็ค 3 ใบไป Outside Area`);
+      await H.fetchFromSideline(p, c => c && c.type === 'Character' &&
+        (((c.traits || '').includes('Shie Hassaikai') && !(c.name || '').includes('Overhaul')) || (c.name || '').includes('Eri')),
+        `${unit.card.name}: เลือกการ์ดจาก Outside Area`);
+    },
+  };
+
+  // 035 Aizawa Shota — [On Play] rest an enemy Front Line character. (The "all enemy characters
+  // lose their keywords while this is in the Front Line" aura is not implemented: keywords are read
+  // straight off each unit with no per-defender aura hook.)
+  reg['MHA-1-035'] = { async onPlay(G, p, unit) { await H.restEnemyFront(p); } };
+
+  // 051 Togata Mirio — [On Retire] with 3 or more other characters of required energy 4+ on your
+  // field, you may play this card's Raid source to your Front Line active.
+  reg['MHA-1-051'] = {
+    async onSideline(G, p, unit, reason) {
+      if ([...p.front, ...p.energy].filter(u => u !== unit && (u.card.need || 0) >= 4).length < 3) return;
+      if (!unit.under.length || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ลงการ์ดใต้ Raid State ลง Front Line (active)?`,
+        [{ label: 'ลง', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await playRaidSourceCard(p, unit, { active: true });
+    },
+  };
+
+  // 053 Bakugo Katsuki — [When Attacking] choose +1000 BP or [Impact (1)] for the turn.
+  reg['MHA-1-053'] = {
+    async onAttack(G, p, unit) {
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: '+1000 BP', value: 'bp' }, { label: '[Impact (1)]', value: 'imp' },
+      ]);
+      if (v === 'imp') { unit.tempImpact = (unit.tempImpact || 0) + 1; log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`); }
+      else { unit.bpMod += 1000; log(`${unit.card.name}: +1000 BP เทิร์นนี้`); }
+    },
+  };
 })();
