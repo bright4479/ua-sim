@@ -90,7 +90,7 @@ function residualText(c) {
   t = t.replace(/cannot be blocked by characters with (?:BP ?\d+|\d+ ?BP) or (?:less|more)\.?/gi, ' ');
   // whole sentences the engine already implements (selfGenBonus etc.) — matching only the opening
   // fragment left tails like "the energy it generates by 1" behind and reported false residuals
-  t = t.replace(/If this (?:character|card) is active,?\s*(?:increase (?:this (?:character|card)'?s? )?(?:the )?(?:generated energy|energy it generates|card generated energy) by \d+|this character generates (?:addition\w* \+?\d+|\d+ addition\w*)|it gains\s*energy generation)\s*\.?/gi, ' ');
+  t = t.replace(/If this (?:character|card) is active,?\s*(?:increase (?:this (?:character|card)'?s? )?(?:the )?(?:generated energy|energy it generates|card generated energy) by \+?\d+|this character generates (?:addition\w* \+?\d+|\d+ addition\w*)|it gains\s*energy generation)\s*\.?/gi, ' ');
   t = t.replace(PASSIVE_TEXT_RE, ' ');
   for (const re of COST_DISCOUNT_RES) t = t.replace(re, ' ');
   t = t.replace(/[@.,;:\s]+/g, ' ').trim();

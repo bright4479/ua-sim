@@ -765,4 +765,263 @@
       log(`${unit.card.name}: สลับตำแหน่งกับ ${t.card.name}`);
     },
   };
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  const namedOnArea = (p, name) => [...p.front, ...p.energy].some(u => (u.card.name || '').includes(name));
+  // several cards swap one of your Front Line characters with one on your Energy Line
+  async function swapFrontEnergy(p, frontPred, energyPred, title) {
+    const f = p.front.filter(frontPred), e = p.energy.filter(energyPred);
+    if (!f.length || !e.length) return;
+    const fu = await p.controller.chooseOwnCharacter(p, f, `${title}: เลือก character บน Front Line`, true);
+    const a = f.find(x => x.uid === fu);
+    if (!a) return;
+    const eu = await p.controller.chooseOwnCharacter(p, e, `${title}: เลือก character บน Energy Line`, true);
+    const b = e.find(x => x.uid === eu);
+    if (!b) return;
+    p.front[p.front.indexOf(a)] = b;
+    p.energy[p.energy.indexOf(b)] = a;
+    log(`${title}: สลับตำแหน่ง ${a.card.name} กับ ${b.card.name}`);
+  }
+
+  // 008 Kamado Tanjiro — [On Play] fetch a <Kamado Nezuko> (need<=3, ap1) from your Outside Area,
+  // then you may free-play one from your hand rested.
+  reg['KMY-1-008'] = {
+    async onPlay(G, p, unit) {
+      const pred = c => c && (c.name || '').includes('Kamado Nezuko') && (c.need || 0) <= 3 && (c.ap || 0) === 1;
+      await H.fetchFromSideline(p, pred, `${unit.card.name}: เลือก Kamado Nezuko จาก Outside Area`);
+      const i = p.hand.findIndex(no => pred(byNo(no)));
+      if (i < 0 || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ลง ${byNo(p.hand[i]).name} ลงสนาม (rested)?`,
+        [{ label: 'ลง', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+    },
+  };
+
+  // 011 Kamado Nezuko — [When Attacking] swap a <Kamado Tanjiro> on your Front Line with another
+  // character on your Energy Line.
+  reg['KMY-1-011'] = {
+    async onAttack(G, p, unit) {
+      await swapFrontEnergy(p, u => (u.card.name || '').includes('Kamado Tanjiro'), u => u !== unit, unit.card.name);
+    },
+  };
+
+  // 015 / 078 Hashibira Inosuke — retire itself at the end of your Attack Phase (015 only while
+  // still active).
+  reg['KMY-1-015'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (p.front.includes(unit) && !unit.rested) await Engine.sidelineUnit(p, unit, 'effect');
+    },
+  };
+  reg['KMY-1-078'] = {
+    async onAttackPhaseEnd(G, p, unit) { await Engine.sidelineUnit(p, unit, 'effect'); },
+  };
+
+  // 035 Kibutsuji Muzan — cannot be played or moved to the Front Line unless your Outside Area
+  // holds 20 or more cards.
+  reg['KMY-1-035'] = {
+    canPlayFromHand(p) { return p.sideline.length >= 20; },
+    canMoveToFront(p) { return p.sideline.length >= 20; },
+  };
+
+  // 036 Kibutsuji Muzan — [Main][1 Per Turn] retire another of your characters and mill 1; if you
+  // did, +1000 BP this turn.
+  reg['KMY-1-036'] = {
+    async onMain(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      const others = [...p.front, ...p.energy].filter(u => u !== unit && u.card.type === 'Character');
+      if (!others.length) { p.controller.notify?.('ไม่มี character อื่น'); return; }
+      const uid = await p.controller.chooseOwnCharacter(p, others, `${unit.card.name}: เลือก character ให้ retire`);
+      const t = others.find(x => x.uid === uid);
+      if (!t) return;
+      unit._usedTurn = Engine.G.turn;
+      await Engine.sidelineUnit(p, t, 'effect');
+      if (p.deck.length) { p.sideline.push(p.deck.shift()); p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1; }
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 052 Akaza — [On Play] you may place 2 cards from your hand to the Outside Area; if you did,
+  // gain [Sniper] and [Impact (1)] this turn.
+  reg['KMY-1-052'] = {
+    async onPlay(G, p, unit) {
+      if (p.hand.length < 2) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้ง 2 ใบเพื่อรับ [Sniper] + [Impact (1)]?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      for (let i = 0; i < 2; i++) if (!await H.discardFromHand(p)) return;
+      unit.tempSnipe = true;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Sniper] และ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 055 Gyutaro — [1 Per Turn] set itself active after winning a battle. @[When Attacking] draw 1
+  // if a <Daki> is on your area.
+  reg['KMY-1-055'] = {
+    async onWinBattle(G, p, unit) {
+      if (unit._standTurn === Engine.G.turn) return false;
+      unit._standTurn = Engine.G.turn;
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น Active`);
+      return false; // the loser is still sidelined normally
+    },
+    async onAttack(G, p, unit) {
+      if (!namedOnArea(p, 'Daki')) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 070 Agatsuma Zenitsu — [On Play] fetch any Character Card other than <Agatsuma Zenitsu> from
+  // your Outside Area.
+  reg['KMY-1-070'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => c && c.type === 'Character' && !(c.name || '').includes('Agatsuma Zenitsu'),
+        `${unit.card.name}: เลือก Character จาก Outside Area`);
+    },
+  };
+
+  // 071 Agatsuma Zenitsu (Raid) — [On Play] with an <Inosuke Hashibira> on your field, draw 2 and
+  // place 1 card from your hand to the Outside Area.
+  reg['KMY-1-071'] = {
+    async onPlay(G, p, unit) {
+      if (!namedOnArea(p, 'Inosuke Hashibira') && !namedOnArea(p, 'Hashibira Inosuke')) return;
+      Engine.draw(p, 2);
+      log(`${unit.card.name}: จั่ว 2 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 079 Hashibira Inosuke (Raid) — [On Play] with a <Zenitsu Agatsuma> on your field, set another
+  // of your characters to active.
+  reg['KMY-1-079'] = {
+    async onPlay(G, p, unit) {
+      if (!namedOnArea(p, 'Zenitsu Agatsuma') && !namedOnArea(p, 'Agatsuma Zenitsu')) return;
+      const others = [...p.front, ...p.energy].filter(u => u !== unit && u.rested);
+      if (!others.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, others, `${unit.card.name}: เลือก character ให้ตั้งขึ้น`, true);
+      const t = others.find(x => x.uid === uid);
+      if (t) { t.rested = false; log(`${unit.card.name}: ${t.card.name} ตั้งขึ้น`); }
+    },
+  };
+
+  // 090 Rengoku Kyojuro — [On Play] you may discard 1; if you did, retire an enemy Front Line
+  // character with BP 3000 or less and gain [Impact (1)] this turn.
+  reg['KMY-1-090'] = {
+    async onPlay(G, p, unit) {
+      if (!p.hand.length) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อ retire ศัตรู + [Impact (1)]?`,
+        [{ label: 'ทำ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v || !await H.discardFromHand(p)) return;
+      await H.retireEnemyFront(p, 3000);
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 094 Bento (Field) — [Main][Rest] choose 1 of your characters, +1000 BP this turn.
+  reg['KMY-1-094'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
+      unit.rested = true;
+      await H.buffOwnCharacter(p, 1000);
+    },
+  };
+
+  // 103 Kamado Tanjiro (Raid) — [On Play] with a <Kamado Nezuko> on your area, +500 BP and
+  // [Impact (1)] until the start of your next turn.
+  reg['KMY-1-103'] = {
+    async onPlay(G, p, unit) {
+      if (!namedOnArea(p, 'Kamado Nezuko')) return;
+      unit.bpPersist += 500;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: +500 BP และ [Impact (1)] จนถึงต้นเทิร์นหน้า`);
+    },
+  };
+
+  // 107 Tomioka Giyu — [On Play] rest an enemy Front Line character, then draw 1.
+  reg['KMY-1-107'] = {
+    async onPlay(G, p, unit) {
+      await H.restEnemyFront(p);
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 2-010 Uzui Tengen — [When Attacking] swap a <Trait: Tengen's Wife> on your Front Line with a
+  // <Uzui Tengen> or <Trait: Disguise> on your Energy Line.
+  reg['KMY-2-010'] = {
+    async onAttack(G, p, unit) {
+      await swapFrontEnergy(p,
+        u => (u.card.traits || '').includes("Tengen's Wife"),
+        u => (u.card.name || '').includes('Uzui Tengen') || (u.card.traits || '').includes('Disguise'),
+        unit.card.name);
+    },
+  };
+
+  // 2-011 Rengoku Kyojuro — [On Retire] choose up to 1 other character on your area, +1000 BP this
+  // turn. (The "your other characters cannot be targeted by [Sniper]" aura is not implemented: the
+  // snipe gate reads only the attacker's own keywords, with no per-defender aura hook.)
+  reg['KMY-2-011'] = {
+    async onSideline(G, p, unit, reason) { await H.buffOwnCharacter(p, 1000, { excludeUnit: unit }); },
+  };
+
+  // 3-008 Kocho Shinobu — draw 1 when this character attacks and loses, and again when it is
+  // retired by an effect or by its BP hitting 0.
+  reg['KMY-3-008'] = {
+    // fires for every attack that loses, so it only counts when THIS character was the attacker
+    async onAnyLoseBattle(G, p, atk, enemy, defender, self) {
+      if (atk !== self) return;
+      Engine.draw(p, 1);
+      log(`${self.card.name}: จั่ว 1 ใบ`);
+    },
+    async onSideline(G, p, unit, reason) {
+      if (reason === 'battle') return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 3-010 Tomioka Giyuu — [When Attacking] with 6 or more <Ubuyashiki Kagaya> / other
+  // <Trait: Hashira> cards on your area, another Hashira gets +1500 BP this turn.
+  reg['KMY-3-010'] = {
+    async onAttack(G, p, unit) {
+      const n = [...p.front, ...p.energy].filter(u => u !== unit &&
+        ((u.card.name || '').includes('Ubuyashiki Kagaya') || (u.card.traits || '').includes('Hashira'))).length;
+      if (n < 6) return;
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').includes('Hashira'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:Hashira`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.bpMod += 1500; log(`${unit.card.name}: ${t.card.name} +1500 BP เทิร์นนี้`); }
+    },
+  };
+
+  // 3-024 Shinazugawa Genya — [On Retire] you may return this card to your hand.
+  reg['KMY-3-024'] = {
+    async onSideline(G, p, unit, reason) {
+      const i = p.sideline.lastIndexOf(unit.no);
+      if (i < 0) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เอากลับเข้ามือ?`,
+        [{ label: 'เอากลับ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(unit.no);
+      log(`${unit.card.name}: กลับเข้ามือ`);
+    },
+  };
+
+  // 3-033 Kanjori Mitsuri — passive: +1 generated energy while a <Nichirin Sword (Kanroji
+  // Mitsuri)> is on your area.
+  reg['KMY-3-033'] = {
+    genMod(unit, p) { return namedOnArea(p, 'Nichirin Sword (Kanroji Mitsuri)') ? 1 : 0; },
+  };
+
+  // 3-039 Tokito Muichiro — [On Play] an enemy Front Line character with BP 2500 or higher gets
+  // -2000 BP this turn. (The "chosen by a Nichirin Sword effect" reactive is still unhandled: no
+  // marker tracks which card chose this one.)
+  reg['KMY-3-039'] = {
+    async onPlay(G, p, unit) { await H.debuffEnemyAny(p, -2000, { min: 2500 }); },
+  };
 })();

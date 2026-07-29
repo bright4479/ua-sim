@@ -1031,7 +1031,7 @@
   // was previously unscripted are this shape.
   function parseKeywordCondition(text) {
     let m;
-    if ((m = text.match(/^If there is an? <([^>]+)> on your area$/i))) {
+    if ((m = text.match(/^If (?:there is|you have) an? <([^>]+)> (?:on your area|in your field|on your field)$/i))) {
       const name = m[1].trim();
       return (owner, unit) => countMatching(owner, unit, { name }) >= 1;
     }
