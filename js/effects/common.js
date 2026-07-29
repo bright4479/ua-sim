@@ -1084,7 +1084,7 @@
       return owner => { const l = Engine.opponentOf(owner).life.length; return orLess ? l <= n : l === n; };
     }
     // "on the same line/lane" — the other unit must share this one's line (one or two named cards)
-    if ((m = text.match(/^If there is an? <([^>]+)>(?: or an? <([^>]+)>)? (?:on|in) the same l(?:ane|ine)$/i))) {
+    if ((m = text.match(/^If there is an? <([^>]+)>(?: or an? <([^>]+)>)? (?:on|in) the same l(?:ane|ine)(?: as this character)?$/i))) {
       const names = [m[1].trim(), m[2]?.trim()].filter(Boolean);
       return (owner, unit) => {
         const line = owner.front.includes(unit) ? owner.front : owner.energy;

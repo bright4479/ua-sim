@@ -72,11 +72,14 @@ const COST_DISCOUNT_RES = [
   /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)\.?/i,
   /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+\.?/i,
   /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+\.?/i,
-  /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+\.?/i,
+  /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+(?: from your hand)?\.?/i,
   /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+\.?/i,
 ];
 function residualText(c) {
   let t = c.effect || '';
+  // cost-discount sentences must be matched BEFORE bracket tags are stripped — several of them key
+  // off a "[yellow] or [blue] Card" colour token that would otherwise be gone by the time they run
+  for (const re of COST_DISCOUNT_RES) t = t.replace(re, ' ');
   t = t.replace(/\[[^\]]*\]/g, ' ');                 // all bracket-tag keywords ([Step] [Raid] [Impact(2)] ...)
   t = t.replace(/<[^>]*>/g, ' ');                     // <NAME> / <Trait: X> tokens left dangling after tag strip
   t = t.replace(/This (?:card|character) (?:is )?also treated as\s*\.?/gi, ' ');

@@ -1111,4 +1111,232 @@
       log(`${unit.card.name}: ${t.card.name} ถูก retire`);
     },
   };
+
+  // 022 Fushiguro Megumi — [On Play] look at the top 5, add 1 <Trait: Shikigami> or <Chimera Shadow
+  // Garden>, then you may free-play a Trait:Shikigami with AP cost 1 from your hand rested.
+  reg['JJK-1-022'] = {
+    async onPlay(G, p, unit) {
+      await H.lookTopAndTake(p, 5, c => c && ((c.traits || '').includes('Shikigami') || (c.name || '').includes('Chimera Shadow Garden')),
+        1, `${unit.card.name}: ดูการ์ดบนสุด 5 ใบ`);
+      const i = p.hand.findIndex(no => { const c = byNo(no); return c && c.type === 'Character' && (c.traits || '').includes('Shikigami') && (c.ap || 0) === 1 && Engine.hasEnergyFor(p, c); });
+      if (i < 0 || p.front.length >= 4) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ลง ${byNo(p.hand[i]).name} ลงสนาม (rested)?`,
+        [{ label: 'ลง', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+    },
+  };
+
+  // 081 Todo Aoi — [On Play] +2000 BP this turn, then you may swap an enemy Front Line character
+  // with one on their Energy Line.
+  reg['JJK-1-081'] = {
+    async onPlay(G, p, unit) {
+      unit.bpMod += 2000;
+      log(`${unit.card.name}: +2000 BP เทิร์นนี้`);
+      const enemy = Engine.opponentOf(p);
+      if (!enemy.front.length || !enemy.energy.length) return;
+      const fUid = await p.controller.chooseEnemyCharacter(p, enemy.front, `${unit.card.name}: เลือก character ศัตรูบน Front Line`, true);
+      const f = enemy.front.find(x => x.uid === fUid);
+      if (!f) return;
+      const eUid = await p.controller.chooseEnemyCharacter(p, enemy.energy, `${unit.card.name}: เลือก character ศัตรูบน Energy Line`, true);
+      const e = enemy.energy.find(x => x.uid === eUid);
+      if (!e) return;
+      enemy.front[enemy.front.indexOf(f)] = e;
+      enemy.energy[enemy.energy.indexOf(e)] = f;
+      log(`${unit.card.name}: สลับตำแหน่ง ${f.card.name} กับ ${e.card.name}`);
+    },
+  };
+
+  // 084 Miwa Kasumi — the forced-block keyword is parsed statically; these two clauses debuff an
+  // enemy by -1000 BP for each OTHER <Trait: Kyoto School> card sharing this character's line.
+  function kyotoInLine(p, unit) {
+    const line = p.front.includes(unit) ? p.front : p.energy;
+    return line.filter(u => u !== unit && (u.card.traits || '').includes('Kyoto School')).length;
+  }
+  reg['JJK-1-084'] = {
+    async onPlay(G, p, unit) {
+      const n = kyotoInLine(p, unit);
+      if (n > 0) await H.debuffEnemyFront(p, -1000 * n);
+    },
+    async onBlock(G, p, unit, atkUnit) {
+      const n = kyotoInLine(p, unit);
+      if (n > 0 && atkUnit) {
+        atkUnit.bpMod -= 1000 * n;
+        log(`${unit.card.name}: ${atkUnit.card.name} -${1000 * n} BP เทิร์นนี้`);
+        await Engine.checkBpZero();
+      }
+    },
+  };
+
+  // 093 Mahito — [On Play] an enemy Front Line character gets -2500 BP, then fetch a
+  // <Trait: Transfigured Humans> or <Self-Embodiment of Perfection> from your Outside Area.
+  reg['JJK-1-093'] = {
+    async onPlay(G, p, unit) {
+      await H.debuffEnemyFront(p, -2500);
+      await H.fetchFromSideline(p, c => c && ((c.traits || '').includes('Transfigured Humans') || (c.name || '').includes('Self-Embodiment of Perfection')),
+        `${unit.card.name}: เลือกการ์ดจาก Outside Area`);
+    },
+  };
+
+  // 103 Gojo Satoru — [On Play][When in Frontline] your opponent returns 1 of their Front Line
+  // characters to hand (they choose which).
+  reg['JJK-1-103'] = {
+    async onPlay(G, p, unit) {
+      if (!p.front.includes(unit)) return;
+      const enemy = Engine.opponentOf(p);
+      const pool = enemy.front.filter(u => u.card.type === 'Character');
+      if (!pool.length) return;
+      const uid = await enemy.controller.chooseOwnCharacter(enemy, pool, `${unit.card.name}: เลือก character ของคุณกลับมือ`);
+      const t = pool.find(x => x.uid === uid) || pool[0];
+      await Engine.returnUnitToHand(enemy, t);
+      log(`${unit.card.name}: ${t.card.name} กลับมือ`);
+    },
+  };
+
+  // 2-004 Gojo Satoru — [On Retire] look at the top 3, add 1 <Gojo Satoru>/<Ieiri Shoko>/<Getou
+  // Suguru>; if you added one, place 1 card from your hand to the Outside Area. (Its conditional
+  // [Damage (2)] is evaluated live by the generic keyword evaluator.)
+  reg['JJK-2-004'] = {
+    async onSideline(G, p, unit, reason) {
+      const taken = await H.lookTopAndTake(p, 3, c => c && /Gojo Satoru|Ieiri Shoko|Getou Suguru/i.test(c.name || ''), 1,
+        `${unit.card.name}: ดูการ์ดบนสุด 3 ใบ`);
+      if (taken.length) await H.discardFromHand(p);
+    },
+  };
+
+  // 3-009 Max Elephant — [On Play] return 1 other <Trait: Shikigami> on your area to hand; if there
+  // is none, return this character instead.
+  reg['JJK-3-009'] = {
+    async onPlay(G, p, unit) {
+      const others = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').includes('Shikigami'));
+      if (!others.length) { await Engine.returnUnitToHand(p, unit); log(`${unit.card.name}: กลับมือ (ไม่มี Shikigami อื่น)`); return; }
+      const uid = await p.controller.chooseOwnCharacter(p, others, `${unit.card.name}: เลือก Trait:Shikigami กลับมือ`);
+      const t = others.find(x => x.uid === uid) || others[0];
+      await Engine.returnUnitToHand(p, t);
+      log(`${unit.card.name}: ${t.card.name} กลับมือ`);
+    },
+  };
+
+  // 3-015 Sukuna — [On Play] pick 1 of 3 effects; 2 of them with 3 <Sukuna's Finger> in your
+  // Outside Area, all 3 with 4 or more.
+  reg['JJK-3-015'] = {
+    async onPlay(G, p, unit) {
+      const f = fingersInSideline(p);
+      const picks = f >= 4 ? 3 : f >= 3 ? 2 : 1;
+      const enemy = Engine.opponentOf(p);
+      const menu = [
+        { label: 'จั่ว 1 ใบ + ศัตรูทิ้ง 1 ใบ', value: 'a' },
+        { label: 'ศัตรู Front Line ที่ BP 2500+ ทั้งหมด -2000 BP', value: 'b' },
+        { label: 'Retire ศัตรู BP 3500 หรือน้อยกว่า', value: 'c' },
+      ];
+      const done = new Set();
+      for (let i = 0; i < picks; i++) {
+        const left = menu.filter(o => !done.has(o.value));
+        if (!left.length) break;
+        const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect (${i + 1}/${picks})`, left);
+        if (v == null) break;
+        done.add(v);
+        if (v === 'a') {
+          Engine.draw(p, 1);
+          log(`${unit.card.name}: จั่ว 1 ใบ`);
+          if (enemy.hand.length) {
+            const hi = await enemy.controller.chooseCardFromHand(enemy, `${unit.card.name}: เลือกการ์ดทิ้งไป Outside Area`);
+            if (hi != null) { enemy.sideline.push(enemy.hand.splice(hi, 1)[0]); log(`${enemy.name}: ทิ้ง 1 ใบไป Outside Area`); }
+          }
+        } else if (v === 'b') {
+          for (const u of enemy.front) if (Engine.bp(u) >= 2500) u.bpMod -= 2000;
+          log(`${unit.card.name}: ศัตรู Front Line (BP 2500+) -2000 BP เทิร์นนี้`);
+          await Engine.checkBpZero();
+        } else {
+          await H.retireEnemyFront(p, 3500);
+        }
+      }
+    },
+  };
+
+  // 3-018 Nanami Kento — [On Play] place the top card of your deck to the Outside Area.
+  reg['JJK-3-018'] = {
+    async onPlay(G, p, unit) {
+      if (!p.deck.length) return;
+      p.sideline.push(p.deck.shift());
+      p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
+      log(`${unit.card.name}: ส่งการ์ดบนสุดของเด็คไป Outside Area`);
+    },
+  };
+
+  // 3-019 Nanami Kento (Raid) — [On Play] an enemy Front Line character cannot attack until the
+  // start of your next turn. @[When Attacking] mill 1; then with 15 or fewer cards left, draw 1 and
+  // every enemy Front Line character with BP 1500+ gets -1000 BP.
+  reg['JJK-3-019'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const pool = enemy.front.filter(u => u.card.type === 'Character' && !u.kw.untargetable && !u.tempUntargetable);
+      if (!pool.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรู`, true);
+      const t = pool.find(x => x.uid === uid);
+      if (!t) return;
+      t.tempCannotAttack = true;
+      Engine.scheduleDelayedAction(Engine.G.turn + 2, () => { t.tempCannotAttack = false; });
+      log(`${unit.card.name}: ${t.card.name} ห้ามโจมตีจนถึงต้นเทิร์นหน้าของคุณ`);
+    },
+    async onAttack(G, p, unit) {
+      if (p.deck.length) {
+        p.sideline.push(p.deck.shift());
+        p._placedToOutsideThisTurn = (p._placedToOutsideThisTurn || 0) + 1;
+        log(`${unit.card.name}: ส่งการ์ดบนสุดของเด็คไป Outside Area`);
+      }
+      if (p.deck.length > 15) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      const enemy = Engine.opponentOf(p);
+      for (const u of enemy.front) if (Engine.bp(u) >= 1500) u.bpMod -= 1000;
+      log(`${unit.card.name}: ศัตรู Front Line (BP 1500+) -1000 BP เทิร์นนี้`);
+      await Engine.checkBpZero();
+    },
+  };
+
+  // 3-024 "Be Proud You Are Strong" — retire 1 enemy Front Line character whose ORIGINAL (printed)
+  // BP is 4000 or higher, then draw 2.
+  reg['JJK-3-024'] = {
+    async onEvent(G, p, card) {
+      const enemy = Engine.opponentOf(p);
+      const pool = enemy.front.filter(u => u.card.type === 'Character' && (u.card.bp || 0) >= 4000 && !u.kw.untargetable && !u.tempUntargetable);
+      if (pool.length) {
+        const uid = await p.controller.chooseEnemyCharacter(p, pool, `${card.name}: เลือก character ศัตรู (BP ตั้งต้น 4000+)`);
+        const t = pool.find(x => x.uid === uid) || pool[0];
+        await Engine.sidelineUnit(enemy, t, 'effect');
+        log(`${card.name}: ${t.card.name} ถูก retire`);
+      }
+      Engine.draw(p, 2);
+      log(`${card.name}: จั่ว 2 ใบ`);
+    },
+  };
+
+  // 3-027 Ultimate Mechamaru Mode Absolute — [On Play] choose 1: retire an enemy Front Line
+  // character with BP 3500 or less, or retire an enemy Field.
+  reg['JJK-3-027'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'Retire ศัตรู BP 3500 หรือน้อยกว่า', value: 'a' },
+        { label: 'Retire Field ของศัตรู', value: 'b' },
+      ]);
+      if (v === 'a') { await H.retireEnemyFront(p, 3500); return; }
+      const fields = [...enemy.front, ...enemy.energy].filter(u => u.card.type === 'Field');
+      if (!fields.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, fields, `${unit.card.name}: เลือก Field ของศัตรู`, true);
+      const t = fields.find(x => x.uid === uid);
+      if (t) { await Engine.sidelineUnit(enemy, t, 'effect'); log(`${unit.card.name}: ${t.card.name} ถูก retire`); }
+    },
+  };
+
+  // 3-030 Muta Kokichi — [On Play] with 5 other <Trait: Kyoto School> cards or a <Miwa Kasumi> on
+  // your area, an enemy Front Line character gets -1000 BP.
+  reg['JJK-3-030'] = {
+    async onPlay(G, p, unit) {
+      const units = [...p.front, ...p.energy];
+      const ok = units.filter(u => u !== unit && (u.card.traits || '').includes('Kyoto School')).length >= 5 ||
+        units.some(u => (u.card.name || '').includes('Miwa Kasumi'));
+      if (ok) await H.debuffEnemyFront(p, -1000);
+    },
+  };
 })();
