@@ -1199,4 +1199,74 @@
       return true;
     },
   };
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  // 1-023 Genthru — [On Play] reveal the top card; if its required energy is 2 or more, retire an
+  // enemy Front Line character with BP 3000 or less. The revealed card goes back on top or bottom.
+  reg['HTR-1-023'] = {
+    async onPlay(G, p, unit) {
+      if (!p.deck.length) return;
+      const c = byNo(p.deck[0]);
+      log(`${unit.card.name}: เปิดการ์ดบนสุด — ${c?.name} (Energy ${c?.need ?? '-'})`);
+      if ((c?.need || 0) >= 2) await H.retireEnemyFront(p, 3000);
+      const dest = await p.controller.chooseOption(p, `${unit.card.name}: วาง ${c?.name} ไว้ที่ไหน?`,
+        [{ label: 'บนสุด', value: 'top' }, { label: 'ล่างสุด', value: 'bottom' }]);
+      if (dest === 'bottom') p.deck.push(p.deck.shift());
+    },
+  };
+
+  // 1-043 Hisoka — [On Play] pull an enemy Energy Line character to their Front Line; if that line
+  // is already full, swap it with one of their Front Line characters instead.
+  reg['HTR-1-043'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      if (!enemy.energy.length) return;
+      const eUid = await p.controller.chooseEnemyCharacter(p, enemy.energy, `${unit.card.name}: เลือก character ศัตรูบน Energy Line`);
+      const e = enemy.energy.find(x => x.uid === eUid);
+      if (!e) return;
+      if (enemy.front.length < 4) { await Engine.moveUnitFree(enemy, e, 'front'); return; }
+      const fUid = await p.controller.chooseEnemyCharacter(p, enemy.front, `${unit.card.name}: เลือก character ศัตรูบน Front Line เพื่อสลับ`);
+      const f = enemy.front.find(x => x.uid === fUid);
+      if (!f) return;
+      enemy.front[enemy.front.indexOf(f)] = e;
+      enemy.energy[enemy.energy.indexOf(e)] = f;
+      log(`${unit.card.name}: สลับตำแหน่ง ${f.card.name} กับ ${e.card.name}`);
+    },
+  };
+
+  // 1-050 Illumi — [On Play] mark an enemy character; if it is retired this turn, draw 2. The mark
+  // rides on the target unit's own watcher list and is scoped to the turn it was applied.
+  reg['HTR-1-050'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const pool = [...enemy.front, ...enemy.energy].filter(u => u.card.type === 'Character');
+      if (!pool.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, pool, `${unit.card.name}: เลือก character ศัตรู`);
+      const t = pool.find(x => x.uid === uid);
+      if (!t) return;
+      const markedTurn = Engine.G.turn;
+      (t._watchers ||= []).push((G2, owner, u2) => {
+        if (Engine.G.turn !== markedTurn) return;   // "during this turn" only
+        Engine.draw(p, 2);
+        log(`${unit.card.name}: ${u2.card.name} ถูก retire — จั่ว 2 ใบ`);
+      });
+      log(`${unit.card.name}: ทำเครื่องหมายที่ ${t.card.name} (ถ้าถูก retire เทิร์นนี้ จั่ว 2 ใบ)`);
+    },
+  };
+
+  // 1-073 Kurapika — [On Play] look at the top card and leave it on top or move it to the bottom.
+  // (Its "[Impact (1)] while your Energy Line generates 6" clause uses a wording the generic
+  // conditional-keyword parser does not cover.)
+  reg['HTR-1-073'] = { async onPlay(G, p, unit) { await H.scryTop(p, ['top', 'bottom']); } };
+
+  // 1-074 Kurapika (Raid) — [On Play] choose: rest an enemy Front Line character, or gain [Sniper].
+  reg['HTR-1-074'] = {
+    async onPlay(G, p, unit) {
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เลือก effect`, [
+        { label: 'วางนอน character ศัตรู', value: 'a' }, { label: 'ได้ [Sniper] เทิร์นนี้', value: 'b' },
+      ]);
+      if (v === 'a') await H.restEnemyFront(p);
+      else { unit.tempSnipe = true; log(`${unit.card.name}: ได้ [Sniper] เทิร์นนี้`); }
+    },
+  };
 })();

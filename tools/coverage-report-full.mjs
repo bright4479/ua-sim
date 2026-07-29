@@ -72,7 +72,7 @@ const COST_DISCOUNT_RES = [
   /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)\.?/i,
   /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+\.?/i,
   /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+\.?/i,
-  /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+(?: from your hand)?\.?/i,
+  /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)(?: on their field)?,?[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+(?: \[?\w+\]?)?(?: from your hand)?\.?/i,
   /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+\.?/i,
 ];
 function residualText(c) {
