@@ -131,6 +131,13 @@ Fan-made web simulator สำหรับเกมการ์ด UNION ARENA �
   - ตัวที่ได้มาชั่วคราว/จากเงื่อนไข ใช้สี `.granted` (ส้ม) แยกจาก printed (ดำ) เพื่อให้ debug ได้ว่า grant ทำงานไหม
   - ทดสอบผ่าน browser จริง: การ์ดที่มี [Impact 1] printed + grant temp อีก 1 → แสดง `⚡2` และ badge ที่ granted ติดสีส้มถูกตัว · 7 badges กินพื้นที่การ์ด 22% (ปรับ padding/font ลงจาก 42%)
 
+### "Choose 1 of the following" (generic — ผู้ใช้รายงานว่าไม่มีอะไรให้เลือก)
+การ์ด 255 ใบพิมพ์เมนูตัวเลือก · 161 ใบมี script รายใบอยู่แล้ว · **94 ใบไม่มีใครถามเลย** clause เงียบสนิท
+- เพิ่ม `matchChooseOptions()` + `runChooseMenu()` ใน common.js — อ่าน bullet (`•`/`·`/`・`) ที่ตามหลัง clause "Choose N of the following" แล้ว**เด้งเมนูให้ผู้เล่นเลือกเสมอ โดยแสดงข้อความจริงบนการ์ด** (ต่อเข้า onPlay / onMain / onAttack / onEvent — `matchOnMain` คืน kind `chooseMenu` เพื่อให้ปุ่ม ⚡ ขึ้นด้วย)
+- `resolveChosenOption()` แก้ตัวเลือกที่เข้า pattern ให้อัตโนมัติ (self keyword grant, +N BP, set active, draw(+discard), retire/rest/debuff ศัตรู, buff พวกเดียวกัน, AP untap, quoted grant)
+- **ผล**: 91/94 ใบมีเมนูแล้ว · ตัวเลือกที่เลือก auto-resolve ได้ **38%** ที่เหลือ log ข้อความให้ผู้เล่นทำเอง (ดีกว่าเงียบ) — ที่เหลือเป็นสำนวนเฉพาะตัว 136 แบบจาก 188 ตัวเลือก
+- **หลักการ**: ถามก่อนเสมอ แม้ resolve อัตโนมัติไม่ได้ — ผู้เล่นต้องได้ตัดสินใจ และเห็นว่าการ์ดเขียนว่าอะไร
+
 ## ⚠️ กับดักสำคัญ (เคยพลาดมาแล้ว)
 
 - **"Outside Area" ในข้อความการ์ด = โซน Sideline (`p.sideline`) ไม่ใช่ Removal Area!**

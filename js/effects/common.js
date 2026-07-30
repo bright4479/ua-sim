@@ -742,6 +742,8 @@
       if (target) applyUnblockableGrant(target, rc);
     } else if ((rc = matchAbilityGrant(fx))) {
       await resolveAbilityGrant(p, unit, rc);
+    } else if ((rc = matchChooseOptions(unit.card.effect)) && (rc.when === 'play' || rc.when === 'any')) {
+      await runChooseMenu(p, unit, unit.card, rc);
     } else if ((rc = matchAllOwnBuff(fx))) {
       const pool = rc.zone === 'front' ? p.front : [...p.front, ...p.energy];
       for (const u of pool) u.bpMod += rc.amount;
@@ -817,6 +819,8 @@
       if (target) applyUnblockableGrant(target, m);
     } else if ((m = matchAbilityGrant(fx))) {
       await resolveAbilityGrant(p, unit, m);
+    } else if ((m = matchChooseOptions(unit.card.effect)) && m.when === 'attack') {
+      await runChooseMenu(p, unit, unit.card, m);
     }
   };
 
@@ -884,6 +888,8 @@
     } else if ((dd = findSeg(card.effect, matchScryDiscardTop))) {
       log(`${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
       await lookTopAndDiscard(p, dd.n, dd.maxDiscard, `${card.name}: ดูการ์ดบนสุด ${dd.n} ใบ`);
+    } else if ((rc = matchChooseOptions(card.effect))) {
+      await runChooseMenu(p, null, card, rc);
     } else {
       log(`Event ${card.name}: ${fx} (ทำ effect ตามการ์ด — manual)`);
       if (!p.controller.isBot) {
@@ -1378,7 +1384,111 @@
         };
       }
     }
+    // "[Main] ... Choose 1 of the following. @• ... @• ..." — offer the printed menu
+    {
+      const spec = matchChooseOptions(card.effect);
+      if (spec && spec.when === 'main') return { kind: 'chooseMenu', spec, oncePerTurn: /\[1 Per Turn\]/i.test(fx) };
+    }
     return null;
+  }
+
+  // ---------- generic "Choose 1 of the following" ----------
+  // 94 cards print a menu of bullet options. Without this the player was never asked at all — the
+  // clause simply did nothing. The menu is always offered (showing the printed wording, so the
+  // choice is meaningful even when the option's body is one this layer cannot resolve yet), and
+  // the picked option is then run through the resolvers below.
+  const CHOOSE_RE = /choose (?:\d+|one|\[?\d+\]?) of the following/i;
+  function matchChooseOptions(effect) {
+    const segs = (effect || '').split('@').map(s => s.trim());
+    const at = segs.findIndex(s => CHOOSE_RE.test(s));
+    if (at < 0) return null;
+    const options = [];
+    for (let i = at + 1; i < segs.length; i++) {
+      if (!/^[•·・-]/.test(segs[i])) break;
+      options.push(segs[i].replace(/^[•·・-]\s*/, '').trim());
+    }
+    if (options.length < 2) return null;
+    const head = segs[at];
+    const when = /^\s*(?:\d+\s*)?\[Main\]/i.test(head) ? 'main'
+      : /\[When Attacking\]/i.test(head) ? 'attack'
+      : /\[On Play\]/i.test(head) ? 'play' : 'any';
+    return { options, when, head };
+  }
+
+  // Runs one chosen option's printed text. Returns false when nothing here understands it, so the
+  // caller can tell the player to resolve it by hand rather than silently doing nothing.
+  async function resolveChosenOption(p, unit, text) {
+    const t = normalizeFx(text);
+    let m;
+    // self keyword grants: "This character gains [Impact (1)] during this turn."
+    const bracket = t.match(/this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?\[([^\]]+)\]/i);
+    if (unit && bracket) {
+      const kwName = bracket[1].toLowerCase();
+      const n = (bracket[1].match(/(\d)/) || [])[1];
+      if (/impact/.test(kwName) && !/negate|nagate/.test(kwName)) unit.tempImpact = (unit.tempImpact || 0) + (n ? parseInt(n) : 1);
+      else if (/damage/.test(kwName)) unit.tempDmg = (unit.tempDmg || 0) + Math.max(1, (n ? parseInt(n) : 2) - 1);
+      else if (/sniper?/.test(kwName)) unit.tempSnipe = true;
+      else if (/double attack/.test(kwName)) unit.tempDoubleAttack = true;
+      else return false;
+      const bp = t.match(/(?:gains?|gets)\s*\+(\d+) ?BP/i);
+      if (bp) unit.bpMod += parseInt(bp[1]);
+      log(`${unit.card.name}: ได้ [${bracket[1].trim()}]${bp ? ` และ +${bp[1]} BP` : ''} เทิร์นนี้`);
+      return true;
+    }
+    // self grant of a quoted ability ("cannot be blocked by ...", "when this attacks, draw", ...)
+    if (unit && /this character (?:gains?|gets)\s*["“]/i.test(t)) {
+      const g = parseUnblockableGrant(t);
+      if (g) { applyUnblockableGrant(unit, g); return true; }
+      const ab = matchAbilityGrant(t);
+      if (ab) { await resolveAbilityGrant(p, unit, ab); return true; }
+      return false;
+    }
+    if (unit && (m = t.match(/^this character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i))) {
+      unit.bpMod += parseInt(m[1]);
+      log(`${unit.card.name}: +${m[1]} BP เทิร์นนี้`);
+      return true;
+    }
+    if (unit && /^set this character to active\.?$/i.test(t)) {
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น Active`);
+      return true;
+    }
+    if ((m = t.match(/^Draw (\d+) cards?(?:[.,]\s*place (\d+) cards? from your hand to the Outside Area)?\.?$/i))) {
+      draw(p, parseInt(m[1]));
+      log(`จั่ว ${m[1]} ใบ`);
+      for (let i = 0; i < (m[2] ? parseInt(m[2]) : 0); i++) await discardFromHand(p);
+      return true;
+    }
+    if ((m = t.match(/^Choose (?:up to )?\d+ characters? on your opponent'?s Front Line with BP (\d+) or less and retire it\.?$/i))) {
+      await retireEnemyFront(p, parseInt(m[1]));
+      return true;
+    }
+    if ((m = t.match(/^Choose (?:up to )?\d+ characters? on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i))) {
+      await restEnemyFront(p, m[1] ? parseInt(m[1]) : null);
+      return true;
+    }
+    if ((m = t.match(/^Choose (?:up to )?\d+ characters? on your opponent'?s Front Line,? it gets -(\d+) ?BP during this turn\.?$/i))) {
+      await debuffEnemyFront(p, -parseInt(m[1]));
+      return true;
+    }
+    if ((m = t.match(/^Choose (?:up to )?\d+ (?:other )?characters? on your area,? it gets \+(\d+) ?BP during this turn\.?$/i))) {
+      await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
+      return true;
+    }
+    if ((m = t.match(/^Choose (?:up to )?(\d+) of your AP cards? and set (?:it|them) to active\.?$/i))) {
+      await apUntap(p, parseInt(m[1]));
+      return true;
+    }
+    return false;
+  }
+
+  async function runChooseMenu(p, unit, card, spec) {
+    const opts = spec.options.map((o, i) => ({ label: o.length > 90 ? o.slice(0, 88) + '…' : o, value: i }));
+    const pick = await p.controller.chooseOption(p, `${card.name}: เลือก 1 effect`, opts);
+    if (pick == null) return;
+    const chosen = spec.options[pick];
+    const done = await resolveChosenOption(p, unit, chosen);
+    if (!done) log(`${card.name}: เลือก "${chosen}" — ทำตามข้อความ (manual)`);
   }
 
   const origOnMain = Effects.onMain.bind(Effects);
@@ -1433,6 +1543,10 @@
       if (mm.rest) unit.rested = true;
       if (mm.oncePerTurn) unit._usedTurn = Engine.G.turn;
       applyUnblockableGrant(target, mm.grant);
+    } else if (mm.kind === 'chooseMenu') {
+      if (mm.oncePerTurn && unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (mm.oncePerTurn) unit._usedTurn = Engine.G.turn;
+      await runChooseMenu(p, unit, unit.card, mm.spec);
     } else if (mm.kind === 'grantAbility') {
       if (mm.oncePerTurn && unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
       if (mm.rest && unit.rested) { p.controller.notify?.('ต้องอยู่ในสถานะ Active'); return; }
