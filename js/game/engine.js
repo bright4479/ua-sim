@@ -73,11 +73,18 @@ const Engine = (() => {
     const dm = fxPassive.match(/\[Damage\s*\(?(\d)\)?\s*\]/i);
     if (dm) kw.dmg = parseInt(dm[1]);
     // [Raid] <Name> or [Raid] [Affinity]
-    const raidLine = fx.match(/\[Raid\]\s*(<[^>]+>|\[[^\]]+\])/i);
+    // "[Raid] <Name>", "[Raid] [Affinity]", "[Raid] <Trait: X>" and "[Raid] <A> or <B>" — every
+    // alternative counts, and a <Trait: ...> token names a trait even though it is angle-bracketed
+    // (reading it as a card name meant trait-based Raid requirements could never find a target).
+    const raidLine = fx.match(/\[Raid\]\s*((?:<[^>]+>|\[[^\]]+\])(?:\s*(?:or|\/|,)\s*(?:<[^>]+>|\[[^\]]+\]))*)/i);
     if (raidLine) {
-      const t = raidLine[1];
-      if (t.startsWith('<')) kw.raidTargets.push({ kind: 'name', value: t.slice(1, -1).trim() });
-      else kw.raidTargets.push({ kind: 'trait', value: t.slice(1, -1).trim() });
+      for (const tok of raidLine[1].match(/<[^>]+>|\[[^\]]+\]/g) || []) {
+        const value = tok.slice(1, -1).trim();
+        const traitPrefixed = /^Trait:?\s*/i.test(value);
+        if (tok.startsWith('[') || traitPrefixed)
+          kw.raidTargets.push({ kind: 'trait', value: value.replace(/^Trait:?\s*/i, '').trim() });
+        else kw.raidTargets.push({ kind: 'name', value });
+      }
     }
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
@@ -1118,6 +1125,23 @@ const Engine = (() => {
     update();
   }
 
+  // Card names and the names printed inside [Raid] requirements are not written consistently: the
+  // same character appears as "Itadori Yuuji" and "Yuji Itadori", and the requirement may romanise
+  // long vowels differently ("Yuji" vs "Yuuji"). A plain substring test therefore failed outright
+  // for 27 Raid cards, which could raid onto nothing at all. Compare as an order-independent token
+  // set with long vowels folded, and keep the substring test as well so this only ever adds matches.
+  const nameTokens = s => (s || '').toLowerCase()
+    .replace(/[()\[\].,'"’-]/g, ' ')
+    .replace(/uu/g, 'u').replace(/oo/g, 'o').replace(/ou/g, 'o')
+    .split(/\s+/).filter(Boolean);
+  function nameMatches(cardName, required) {
+    if (!cardName || !required) return false;
+    if (cardName.includes(required)) return true;
+    const have = new Set(nameTokens(cardName));
+    const want = nameTokens(required);
+    return want.length > 0 && want.every(t => have.has(t));
+  }
+
   function raidTargetsFor(p, c) {
     const kw = parseKeywords(c);
     const out = [];
@@ -1127,7 +1151,8 @@ const Engine = (() => {
         if (u.kw.raidTargets.length) continue; // target must not possess Raid
         if (u.tempRaidable || u.kw.raidableByAny) { out.push(u); continue; } // "your [Raid] cards can raid on this character" (temp grant or permanent printed keyword) — any raider qualifies
         for (const t of kw.raidTargets) {
-          if (t.kind === 'name' && ((u.card.name || '').includes(t.value) || u.kw.alsoTreatedAs.some(a => a.includes(t.value) || t.value.includes(a)))) out.push(u);
+          if (t.kind === 'name' && (nameMatches(u.card.name, t.value) ||
+              u.kw.alsoTreatedAs.some(a => nameMatches(a, t.value) || nameMatches(t.value, a)))) out.push(u);
           else if (t.kind === 'trait' && (u.card.traits || '').includes(t.value)) out.push(u);
         }
       }

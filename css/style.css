@@ -393,6 +393,32 @@ select:focus, input:focus { outline: none; border-color: var(--red); }
 
 .choice-btns { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .choice-btns .btn { text-align: left; }
+
+/* card picker — choosing by art instead of by name */
+.choice-cards {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  margin: 12px 0 4px;
+}
+.choice-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: clamp(84px, 12vw, 116px); padding: 4px;
+  background: rgba(255,255,255,.06); border: 2px solid transparent; border-radius: 8px;
+  cursor: pointer; font: inherit; color: inherit;
+  transition: transform .14s ease, border-color .14s ease, background .14s ease;
+}
+.choice-card img {
+  width: 100%; height: auto; aspect-ratio: 63/88; object-fit: cover;
+  border-radius: 5px; display: block; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+.choice-card .cc-label {
+  font-size: .66rem; font-weight: 700; line-height: 1.25; text-align: center;
+  overflow-wrap: anywhere;
+}
+.choice-card:hover, .choice-card:focus-visible {
+  transform: translateY(-4px); border-color: var(--red); background: rgba(255,255,255,.14);
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) { .choice-card { transition: none; } }
 .hand-preview { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 460px; }
 .hand-preview img { width: 88px; height: auto; aspect-ratio: 63/88; object-fit: cover; border-radius: 5px; }
 /* one straight row (mulligan) — cards at natural proportion */

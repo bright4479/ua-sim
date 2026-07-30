@@ -43,7 +43,7 @@ const GameUI = (() => {
     async chooseAttacker(p, enemy) { return await waitFor('attack'); },
     async chooseBlocker(p, atkUnit, candidates) {
       const btns = candidates.map(u =>
-        ({ label: `🛡 ${u.card.name} (BP ${Engine.bp(u)})`, value: u.uid }));
+        ({ label: `${u.card.name} · BP ${Engine.bp(u)}`, value: u.uid, card: u.card }));
       btns.push({ label: '✘ ไม่บล็อก (รับ damage)', value: null });
       return await modalChoice(`${UAData.escapeHtml(atkUnit.card.name)} (BP ${Engine.bp(atkUnit)}) กำลังโจมตีคุณ!`,
         cardThumb(atkUnit.card), btns);
@@ -67,23 +67,23 @@ const GameUI = (() => {
     },
     async chooseOwnCharacter(p, units, prompt, allowSkip = false) {
       const btns = units.map(u =>
-        ({ label: `${u.card.name} (BP ${Engine.bp(u)})${u.rested ? ' [นอน]' : ''}`, value: u.uid }));
+        ({ label: `${u.card.name} · BP ${Engine.bp(u)}${u.rested ? ' · นอน' : ''}`, value: u.uid, card: u.card }));
       if (allowSkip) btns.push({ label: 'ข้าม (ไม่เลือก)', value: null });
       return await modalChoice(prompt, '', btns);
     },
     async chooseEnemyCharacter(p, units, prompt, allowSkip = false) {
-      const btns = units.map(u => ({ label: `${u.card.name} (BP ${Engine.bp(u)})`, value: u.uid }));
+      const btns = units.map(u => ({ label: `${u.card.name} · BP ${Engine.bp(u)}`, value: u.uid, card: u.card }));
       if (allowSkip) btns.push({ label: 'ข้าม (ไม่เลือก)', value: null });
       return await modalChoice(prompt, '', btns);
     },
     async chooseRaidFromTrigger(p, c, targets) {
-      const btns = targets.map(u => ({ label: `⚡ Raid ทับ ${u.card.name}`, value: u.uid }));
+      const btns = targets.map(u => ({ label: `Raid ทับ ${u.card.name}`, value: u.uid, card: u.card }));
       btns.push({ label: '✋ เก็บเข้ามือแทน', value: null });
       return await modalChoice(`Trigger [Raid] — ${UAData.escapeHtml(c.name)}`, cardThumb(c), btns);
     },
     async chooseDiscard(p) {
       const btns = p.hand.map((no, i) =>
-        ({ label: UAData.byNo.get(no)?.name || no, value: i }));
+        ({ label: UAData.byNo.get(no)?.name || no, value: i, card: UAData.byNo.get(no) }));
       return await modalChoice('มือเกิน 8 ใบ — เลือกทิ้ง (ไป Removal)', '', btns);
     },
     async chooseOption(p, title, options, bodyHtml = '') {
@@ -93,7 +93,7 @@ const GameUI = (() => {
       if (!p.hand.length) return null;
       const btns = p.hand.map((no, i) => {
         const c = UAData.byNo.get(no);
-        return { label: `${c?.name || no} (E${c?.need ?? '-'})`, value: i };
+        return { label: `${c?.name || no} · E${c?.need ?? '-'}`, value: i, card: c };
       });
       return await modalChoice(title, '', btns);
     },
@@ -104,7 +104,7 @@ const GameUI = (() => {
       for (let k = 0; k < n && remaining.length; k++) {
         const btns = remaining.map(i => {
           const c = UAData.byNo.get(p.hand[i]);
-          return { label: `${c?.name || p.hand[i]} (E${c?.need ?? '-'})`, value: i };
+          return { label: `${c?.name || p.hand[i]} · E${c?.need ?? '-'}`, value: i, card: c };
         });
         const i = await modalChoice(`${title} (${k + 1}/${n})`, '', btns);
         if (i == null) break;
@@ -119,7 +119,7 @@ const GameUI = (() => {
       if (!idxs.length) return null;
       const btns = idxs.map(i => {
         const c = UAData.byNo.get(p.removal[i]);
-        return { label: c?.name || p.removal[i], value: i };
+        return { label: c?.name || p.removal[i], value: i, card: c };
       });
       btns.push({ label: 'ไม่เลือก', value: null });
       return await modalChoice(title, '', btns);
@@ -130,7 +130,7 @@ const GameUI = (() => {
       if (!idxs.length) return null;
       const btns = idxs.map(i => {
         const c = UAData.byNo.get(p.sideline[i]);
-        return { label: c?.name || p.sideline[i], value: i };
+        return { label: c?.name || p.sideline[i], value: i, card: c };
       });
       btns.push({ label: 'ไม่เลือก', value: null });
       return await modalChoice(title, '', btns);
@@ -139,14 +139,17 @@ const GameUI = (() => {
     // the rest return to the bottom of the deck in their original relative order.
     async chooseRevealPick(p, revealedNos, title, predicate, maxPick) {
       const cards = revealedNos.map(no => UAData.byNo.get(no));
-      const body = `<div class="hand-preview">${cards.map(c => UAData.imgTag(c)).join('')}</div>`;
       const eligible = revealedNos.map((no, i) => i).filter(i => !predicate || predicate(cards[i]));
+      // the pickable cards already show as tiles, so only preview the reveal when some of it is
+      // NOT pickable — otherwise every card would appear twice
+      const body = eligible.length === cards.length ? ''
+        : `<div class="hand-preview">${cards.map(c => UAData.imgTag(c)).join('')}</div>`;
       if (!eligible.length) { await modalChoice(title, body, [{ label: 'ไม่มีใบที่ตรงเงื่อนไข — วางคืน', value: null }]); return []; }
       const picked = [];
       for (let k = 0; k < maxPick; k++) {
         const remaining = eligible.filter(i => !picked.includes(i));
         if (!remaining.length) break;
-        const btns = remaining.map(i => ({ label: cards[i].name, value: i }));
+        const btns = remaining.map(i => ({ label: cards[i].name, value: i, card: cards[i] }));
         btns.push({ label: picked.length ? 'จบการเลือก' : 'ไม่เลือกใบไหนเลย', value: null });
         const i = await modalChoice(`${title} (เลือกได้สูงสุด ${maxPick})`, body, btns);
         if (i == null) break;
@@ -676,14 +679,24 @@ const GameUI = (() => {
     return new Promise(res => {
       const wrap = document.createElement('div');
       wrap.className = 'modal';
-      wrap.innerHTML = `<div class="modal-card ${opts.wide ? 'wide' : ''}" style="flex-direction:column;${opts.wide ? '' : 'max-width:460px;'}max-height:88vh;overflow:auto">
+      // Buttons carrying a `card` render as a picture tile — picking a character or a card in hand
+      // is much easier from the art than from a name. Plain buttons (skip, effect menus) stay text.
+      const cardBtns = buttons.filter(b => b.card);
+      const textBtns = buttons.filter(b => !b.card);
+      const tiles = cardBtns.length ? `<div class="choice-cards">${cardBtns.map(b =>
+        `<button class="choice-card" data-i="${buttons.indexOf(b)}" title="${UAData.escapeHtml(b.label)}">
+          ${UAData.imgTag(b.card)}
+          <span class="cc-label">${UAData.escapeHtml(b.label)}</span>
+        </button>`).join('')}</div>` : '';
+      const rows = textBtns.length ? `<div class="choice-btns">${textBtns.map(b =>
+        `<button class="btn ${buttons.indexOf(b) === 0 ? 'primary' : ''}" data-i="${buttons.indexOf(b)}">${b.label}</button>`).join('')}</div>` : '';
+      wrap.innerHTML = `<div class="modal-card ${opts.wide || cardBtns.length > 3 ? 'wide' : ''}" style="flex-direction:column;${(opts.wide || cardBtns.length > 3) ? '' : 'max-width:460px;'}max-height:88vh;overflow:auto">
         <h3 style="color:var(--red)">${title}</h3>
         ${bodyHtml || ''}
-        <div class="choice-btns">${buttons.map((b, i) =>
-          `<button class="btn ${i === 0 ? 'primary' : ''}" data-i="${i}">${b.label}</button>`).join('')}</div>
+        ${tiles}${rows}
       </div>`;
       document.body.appendChild(wrap);
-      wrap.querySelectorAll('.choice-btns button').forEach(btn => {
+      wrap.querySelectorAll('.choice-btns button, .choice-card').forEach(btn => {
         btn.onclick = () => { document.body.removeChild(wrap); res(buttons[parseInt(btn.dataset.i)].value); };
       });
     });

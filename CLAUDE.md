@@ -140,6 +140,19 @@ Fan-made web simulator สำหรับเกมการ์ด UNION ARENA �
 - **⛔ generic หมดทางแล้ว**: ตัวเลือกที่ยัง resolve ไม่ได้ 108 อัน มี **107 แบบที่ไม่ซ้ำกัน** (แบบที่ซ้ำสุดโผล่ 2 ครั้ง) → ต่อจากนี้เป็นงาน script รายใบ ไม่ใช่ pattern อีกแล้ว ให้ไปรวมกับคิว residual
 - **หลักการ**: ถามก่อนเสมอ แม้ resolve อัตโนมัติไม่ได้ — ผู้เล่นต้องได้ตัดสินใจ และเห็นว่าการ์ดเขียนว่าอะไร
 
+### Raid bug — ชื่อไม่ตรงกันระหว่างข้อความ [Raid] กับชื่อการ์ดจริง (2026-07-26)
+ผู้ใช้แจ้งว่า Sukuna raid ทับ Itadori (Energy 2) ไม่ได้ — เจอบั๊ก **3 ตัวใน `raidTargetsFor`/`parseKeywords`**:
+1. **ชื่อสะกด/เรียงต่างกัน** — `[Raid] <Itadori Yuji>` แต่การ์ดชื่อ `"Itadori Yuuji"` (uu) หรือ `"Yuji Itadori"` (สลับลำดับ) → `includes()` fail ทั้งคู่ → **Sukuna raid ทับอะไรไม่ได้เลย** กระทบ **27 ใบทั่วฐานข้อมูล** (BLC Abarai Renji, KMY Zenitsu/Inosuke, MHA Shoto/Ochaco, CGH Kouzuki Kallen ฯลฯ) แก้ด้วย `nameMatches()`: เทียบเป็น **token set แบบไม่สนลำดับ + ยุบสระยาว** (uu→u, oo→o, ou→o) **โดยยัง OR กับ `includes()` เดิม** เพื่อให้เพิ่มการแมตช์เท่านั้น ไม่ตัดของเดิม
+2. **`<Trait: X>` ถูกอ่านเป็นชื่อการ์ด** — `[Raid] <Trait: Four Holy Swords>` อยู่ในวงเล็บแหลมเลยถูกจัดเป็น `kind:'name'` → ไม่เคยเจอ target (11 ใบ)
+3. **จับแค่ตัวเลือกแรก** — `[Raid] <A> or <B>` เก็บแค่ A ทำให้ B ใช้ raid ไม่ได้ (9 ใบ)
+- ทดสอบยืนยัน: Sukuna ทับ "Itadori Yuuji" ได้ ✓ · ทับ "Yuji Itadori" ได้ ✓ · ทับ character ที่ไม่เกี่ยวข้อง **ไม่ได้** ✓ (กัน over-match)
+
+### UI: เลือกการ์ดจากรูป ไม่ใช่จากชื่อ (2026-07-26)
+`modalChoice` รับ `card` ต่อปุ่มได้แล้ว → เรนเดอร์เป็น **tile รูปการ์ด** (`.choice-cards`/`.choice-card`) ส่วนปุ่มที่ไม่ใช่การ์ด (ข้าม/ไม่บล็อก/เมนู effect) ยังเป็นข้อความ
+- แปลงครบ 10 จุด: chooseBlocker · chooseOwnCharacter · chooseEnemyCharacter · chooseCardFromHand · chooseCardsFromHand · chooseCardFromRemoval · chooseCardFromSideline · chooseDiscard · chooseRaidFromTrigger · chooseRevealPick
+- `chooseRevealPick` ตัด preview ซ้ำออกเมื่อทุกใบที่เปิดเลือกได้หมด (ไม่งั้นการ์ดโผล่ 2 ที่)
+- ทดสอบผ่าน browser จริง: 4 tile + ปุ่ม "ข้าม" เป็นข้อความ, รูปโหลด HTTP 200 (webp 240px) — `complete:false` ตอนแรกเป็นเพราะ `loading="lazy"` ไม่ยิงใน pane ที่ไม่ composite ไม่ใช่ 404
+
 ## ⚠️ กับดักสำคัญ (เคยพลาดมาแล้ว)
 
 - **"Outside Area" ในข้อความการ์ด = โซน Sideline (`p.sideline`) ไม่ใช่ Removal Area!**
