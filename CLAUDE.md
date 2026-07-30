@@ -135,7 +135,9 @@ Fan-made web simulator สำหรับเกมการ์ด UNION ARENA �
 การ์ด 255 ใบพิมพ์เมนูตัวเลือก · 161 ใบมี script รายใบอยู่แล้ว · **94 ใบไม่มีใครถามเลย** clause เงียบสนิท
 - เพิ่ม `matchChooseOptions()` + `runChooseMenu()` ใน common.js — อ่าน bullet (`•`/`·`/`・`) ที่ตามหลัง clause "Choose N of the following" แล้ว**เด้งเมนูให้ผู้เล่นเลือกเสมอ โดยแสดงข้อความจริงบนการ์ด** (ต่อเข้า onPlay / onMain / onAttack / onEvent — `matchOnMain` คืน kind `chooseMenu` เพื่อให้ปุ่ม ⚡ ขึ้นด้วย)
 - `resolveChosenOption()` แก้ตัวเลือกที่เข้า pattern ให้อัตโนมัติ (self keyword grant, +N BP, set active, draw(+discard), retire/rest/debuff ศัตรู, buff พวกเดียวกัน, AP untap, quoted grant)
-- **ผล**: 91/94 ใบมีเมนูแล้ว · ตัวเลือกที่เลือก auto-resolve ได้ **38%** ที่เหลือ log ข้อความให้ผู้เล่นทำเอง (ดีกว่าเงียบ) — ที่เหลือเป็นสำนวนเฉพาะตัว 136 แบบจาก 188 ตัวเลือก
+- เพิ่ม **conditional unwrapper**: "If your (opponent's) Life is N or less/more, &lt;body&gt;" → เช็ค gate แล้ว **recurse เข้า resolver ตัวเดิม** (ไม่ต้องเขียน pattern ซ้ำต่อเงื่อนไข) — ทดสอบแล้วว่าเคารพเงื่อนไขจริง (Life 3 → ตั้งขึ้น, Life 6 → ข้าม)
+- **ผล**: 91/94 ใบมีเมนูแล้ว · auto-resolve **38%** (manual 102→96 หลังเพิ่ม unwrapper + near-miss wording)
+- **⛔ generic หมดทางแล้ว**: ตัวเลือกที่ยัง resolve ไม่ได้ 108 อัน มี **107 แบบที่ไม่ซ้ำกัน** (แบบที่ซ้ำสุดโผล่ 2 ครั้ง) → ต่อจากนี้เป็นงาน script รายใบ ไม่ใช่ pattern อีกแล้ว ให้ไปรวมกับคิว residual
 - **หลักการ**: ถามก่อนเสมอ แม้ resolve อัตโนมัติไม่ได้ — ผู้เล่นต้องได้ตัดสินใจ และเห็นว่าการ์ดเขียนว่าอะไร
 
 ## ⚠️ กับดักสำคัญ (เคยพลาดมาแล้ว)

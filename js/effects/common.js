@@ -1471,13 +1471,47 @@
       await debuffEnemyFront(p, -parseInt(m[1]));
       return true;
     }
-    if ((m = t.match(/^Choose (?:up to )?\d+ (?:other )?characters? on your area,? it gets \+(\d+) ?BP during this turn\.?$/i))) {
+    // "Choose up to 1 other character on your area, it gets +N BP" — also written "Choose another
+    // character on your area and it gets/gains +N BP"
+    if ((m = t.match(/^Choose (?:(?:up to )?\d+ (?:other )?characters?|another character) on your area,? (?:and )?it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i))) {
       await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
+      return true;
+    }
+    // "Choose another character on your area and it gains [Impact (1)] during this turn."
+    if ((m = t.match(/^Choose (?:(?:up to )?\d+ (?:other )?characters?|another character) on your area,? (?:and )?it (?:gains?|gets)\s*\[([^\]]+)\] during this turn\.?$/i))) {
+      const pool = [...p.front, ...p.energy].filter(u => u !== unit && u.card.type === 'Character');
+      if (!pool.length) return true;
+      const uid = await p.controller.chooseOwnCharacter(p, pool, `เลือก character รับ [${m[1].trim()}]`, true);
+      const tgt = pool.find(x => x.uid === uid);
+      if (tgt) {
+        const kwName = m[1].toLowerCase(), n = (m[1].match(/(\d)/) || [])[1];
+        if (/impact/.test(kwName) && !/negate|nagate/.test(kwName)) tgt.tempImpact = (tgt.tempImpact || 0) + (n ? parseInt(n) : 1);
+        else if (/damage/.test(kwName)) tgt.tempDmg = (tgt.tempDmg || 0) + Math.max(1, (n ? parseInt(n) : 2) - 1);
+        else if (/sniper?/.test(kwName)) tgt.tempSnipe = true;
+        else if (/double attack/.test(kwName)) tgt.tempDoubleAttack = true;
+        else return false;
+        log(`${tgt.card.name}: ได้ [${m[1].trim()}] เทิร์นนี้`);
+      }
       return true;
     }
     if ((m = t.match(/^Choose (?:up to )?(\d+) of your AP cards? and set (?:it|them) to active\.?$/i))) {
       await apUntap(p, parseInt(m[1]));
       return true;
+    }
+    // "If <simple condition>, <body>" — check the gate, then run the body through this same
+    // resolver so every pattern above is reused rather than duplicated per condition.
+    {
+      const cond = t.match(/^If (your Life is (\d+) or (less|more)|your opponent'?s Life is (\d+) or (less|more)),\s*(.+)$/i);
+      if (cond) {
+        const body = cond[6];
+        const mine = cond[2] != null;
+        const n = parseInt(mine ? cond[2] : cond[4]);
+        const less = (mine ? cond[3] : cond[5]).toLowerCase() === 'less';
+        const life = (mine ? p : Engine.opponentOf(p)).life.length;
+        if (less ? life <= n : life >= n) return resolveChosenOption(p, unit, body);
+        log(`เงื่อนไขไม่ผ่าน (Life ${life}) — ข้ามตัวเลือกนี้`);
+        return true;   // the option was legitimately chosen, its condition simply failed
+      }
     }
     return false;
   }
