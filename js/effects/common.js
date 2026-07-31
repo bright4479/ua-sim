@@ -224,7 +224,8 @@
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
-    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:(?:up to )?1 (?:of your )?other|another) [Cc]haracters?(?: in your (?:area|field))?(?: on your (?:area|field))?[.,]?\s*(?:and )?(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
+    // "other"/"another" is optional — several cards let the buff land on this character itself
+    mainRestBuffOther: /^\[Main\]\s*\[Rest this card\]\s*Choose (?:(?:up to )?1 (?:of your )?(other)?|(another)) ?[Cc]haracters?(?: in your (?:area|field))?(?: on your (?:area|field))?[.,]?\s*(?:and )?(?:it (?:gets|gains)|give (?:it|them|it a)|)\s*\+?(\d+) ?BP(?: during this turn)?\.?$/i,
     mainDiscardImpact: /^\[Main\]\s*\[Discard (\d+)\]\s*\[1 Per Turn\]\s*(?:During this turn,\s*)?this character gains \[Impact\s*\(?(\d+)\)?\s*\](?: during this turn)?\.?$/i,
   };
   // "[Main] [Rest this card] [N Per Turn] This character gets +N generated energy ... retire this
@@ -562,9 +563,15 @@
   // Outside Area. Place the remaining at/on top of your deck in any order." — mill-style variant
   // (unpicked cards return to the TOP of the deck, unlike the reveal-and-fetch-to-hand pattern).
   function matchScryDiscardTop(fx) {
-    const m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck[.,]\s*[Pp]lace up to (\d+)(?: of them| cards?(?: among them)?) to the Outside Area[.,]?\s*(?:then\s*)?[Pp]lace the remaining(?: cards?)? (?:at|on) (?:the )?top of your deck/i);
-    if (!m) return null;
-    return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
+    let m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck[.,]\s*[Pp]lace up to (\d+)(?: of them| cards?(?: among them)?) to the Outside Area[.,]?\s*(?:then\s*)?[Pp]lace the remaining(?: cards?)? (?:at|on) (?:the )?top of your deck/i);
+    if (m) return { n: parseInt(m[1]), maxDiscard: parseInt(m[2]) };
+    // reversed wording: the keep-on-top half is stated first and the remainder is swept away, so
+    // every one of the N cards may leave — maxDiscard is the full count
+    // (the variant that sweeps the remainder to the BOTTOM OF THE DECK is deliberately not matched
+    // here — lookTopAndDiscard always sends it to the Outside Area, which would be the wrong zone)
+    m = fx.match(/^(?:\[On Play\]\s*)?Look at the top (\d+) cards? of your deck[.,]\s*[Pp]lace any number of (?:cards? among them|them)[^.@]*?top of your deck[^.@]*?[Pp]lace the rest to the Outside Area/i);
+    if (m) return { n: parseInt(m[1]), maxDiscard: parseInt(m[1]) };
+    return null;
   }
 
   // "Choose 1 character on your opponent's Front Line with BP N or less and retire it. If there
@@ -985,7 +992,7 @@
         continue;
       }
       // "If you have N or more cards in your hand, this character gets +N BP."
-      if ((m = rest.match(/^If you have (\d+) or more cards in your hand, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If (?:you have|there are) (\d+) or more cards in your hand, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
@@ -1441,7 +1448,7 @@
     // GNT-style: "For this turn this character generate +N [color] Energy. During end of main phase, retire this card."
     if ((m = fx.match(/^\[Main\]\s*\[Rest this card\]\s*\[1 Per Turn\]\s*For this turn this (?:character|card|field) generate \+(\d+)(?:\s*\[?\w*\]?)? Energy\.?\s*During end of main phase, retire this (?:character|card|field)\.?$/i)))
       return { kind: 'selfGenRetire', n: parseInt(m[1]) };
-    if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[1]) };
+    if ((m = fx.match(RX.mainRestBuffOther))) return { kind: 'restBuffOther', n: parseInt(m[3]), allowSelf: !m[1] && !m[2] };
     if ((m = fx.match(RX.mainDiscardImpact))) return { kind: 'discardImpact', discardN: parseInt(m[1]), impact: parseInt(m[2]) };
     // "[Main] [Rest this card] Look at the top card / 1 card from the top ... top or bottom"
     if (/^\[Main\]\s*\[Rest this card\]\s*Look at (?:the top card|1 card from the top|the top 1 cards?) of your deck/i.test(fx) &&
@@ -1654,7 +1661,7 @@
     } else if (mm.kind === 'restBuffOther') {
       if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่ ใช้ ability ไม่ได้'); return; }
       unit.rested = true;
-      await buffOwnCharacter(p, mm.n, { excludeUnit: unit });
+      await buffOwnCharacter(p, mm.n, mm.allowSelf ? {} : { excludeUnit: unit });
     } else if (mm.kind === 'discardImpact') {
       if (p.hand.length < mm.discardN) { p.controller.notify?.(`ต้องทิ้ง ${mm.discardN} ใบ`); return; }
       const picked = await p.controller.chooseCardsFromHand(p, mm.discardN, `[Discard ${mm.discardN}] เพื่อให้ [Impact ${mm.impact}] เทิร์นนี้`);
@@ -1733,6 +1740,17 @@
       const toRemoval = /remove area/i.test(fx);
       for (let i = 0; i < parseInt(m[2]); i++) {
         if (toRemoval) await manualDiscardToRemoval(p); else await discardFromHand(p);
+      }
+      return;
+    }
+    // "[On Retire] Add this card to your hand." — the engine has already pushed it to the Outside
+    // Area by the time this runs, so take it back out of there rather than out of the unit.
+    if (/^\[On Retire\]\s*Add this card to your hand\.?$/i.test(fx)) {
+      const i = p.sideline.lastIndexOf(unit.no);
+      if (i >= 0) {
+        p.sideline.splice(i, 1);
+        p.hand.push(unit.no);
+        log(`[On Retire] ${unit.card.name}: กลับเข้ามือ`);
       }
       return;
     }

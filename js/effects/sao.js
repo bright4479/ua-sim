@@ -467,4 +467,209 @@
       if (t) await Engine.moveUnitFree(p, t, p.front.includes(t) ? 'energy' : 'front');
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const alo = u => (u.card.traits || '').includes('ALO');
+  const yuukiCount = p => p.sideline.filter(no => /Yuuki|Mother's Rosario/.test(byNo(no)?.name || '')).length;
+  const hasNamed = (p, re) => [...p.front, ...p.energy].some(u => re.test(u.card.name || ''));
+
+  // pick one character from each line and swap the two — shared by 1-041 and 1-104
+  async function swapAcrossLines(p, unit, title, excludeSelf) {
+    const front = p.front.filter(u => !excludeSelf || u !== unit);
+    const energy = p.energy.filter(u => !excludeSelf || u !== unit);
+    if (!front.length || !energy.length) return false;
+    const fu = await p.controller.chooseOwnCharacter(p, front, `${title}: เลือกตัวบน Front Line`, true);
+    const f = front.find(u => u.uid === fu);
+    if (!f) return false;
+    const eu = await p.controller.chooseOwnCharacter(p, energy, `${title}: เลือกตัวบน Energy Line`, true);
+    const e = energy.find(u => u.uid === eu);
+    if (!e) return false;
+    p.front[p.front.indexOf(f)] = e;
+    p.energy[p.energy.indexOf(e)] = f;
+    log(`${title}: สลับตำแหน่ง ${f.card.name} ↔ ${e.card.name}`);
+    return true;
+  }
+
+  // 2-004 Alice Synthesis Thirty — [On Play] if 4+ other Trait:Integrity Knights on your area, set
+  // this character to active.
+  reg['EX08BT-SAO-2-004'] = {
+    async onPlay(G, p, unit) {
+      const n = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').includes('Integrity Knights')).length;
+      if (n < 4) return;
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น (Integrity Knights อื่น ${n} ใบ)`);
+    },
+  };
+
+  // 2-024 Leafa — [On Play] you may pay 1 AP; if you did, return 1 enemy Front Line character with
+  // BP 4000 or less to their hand.
+  reg['EX08BT-SAO-2-024'] = {
+    async onPlay(G, p, unit) {
+      if (Engine.activeAP(p) < 1) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: จ่าย 1 AP เพื่อคืนการ์ดศัตรู (BP ≤4000) เข้ามือ?`,
+        [{ label: 'จ่าย 1 AP', value: true }, { label: 'ไม่จ่าย', value: false }]);
+      if (!ok || !Engine.payApForEffect(p, 1)) return;
+      await H.bounceEnemyFront(p, 4000);
+    },
+  };
+
+  // 2-063 Asuna — [On Play] if 2+ Yuuki/Mother's Rosario total in your Outside Area, draw 1.
+  reg['EX08BT-SAO-2-063'] = {
+    async onPlay(G, p, unit) {
+      if (yuukiCount(p) < 2) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 1-037 Asuna — [Your Turn][1 Per Turn] if this character moves outside your Move Phase, it gains
+  // "[When Attacking] Draw 1 card." during this turn.
+  reg['SAO-1-037'] = {
+    onAnyMove(G, p, moved, unit) {
+      if (moved !== unit || !isYourTurn(p)) return;
+      if (unit._moveGrantTurn === Engine.G.turn) return;
+      unit._moveGrantTurn = Engine.G.turn;
+      unit._grantedAttackDraw = true;
+      log(`${unit.card.name}: ได้ "[When Attacking] จั่ว 1 ใบ" เทิร์นนี้`);
+    },
+  };
+
+  // 1-041 Kirito — [When in Frontline] at the end of this character's attack you may swap it with an
+  // <Asuna> on your Energy Line; [Main][1 Per Turn] swap a Front Line and an Energy Line character.
+  async function kiritoSwapWithAsuna(p, unit) {
+    if (!p.front.includes(unit)) return;
+    const asuna = p.energy.filter(u => /Asuna/.test(u.card.name || ''));
+    if (!asuna.length) return;
+    const uid = await p.controller.chooseOwnCharacter(p, asuna, `${unit.card.name}: สลับตำแหน่งกับ Asuna บน Energy Line?`, true);
+    const a = asuna.find(u => u.uid === uid);
+    if (!a) return;
+    p.front[p.front.indexOf(unit)] = a;
+    p.energy[p.energy.indexOf(a)] = unit;
+    log(`${unit.card.name}: สลับตำแหน่งกับ ${a.card.name}`);
+  }
+  reg['SAO-1-041'] = {
+    // an attack ends whether it was won, lost, or never blocked — cover all three
+    async onWinBattle(G, p, unit) { await kiritoSwapWithAsuna(p, unit); return false; },
+    async onAnyLoseBattle(G, p, atk, enemy, defender, unit) { if (atk === unit) await kiritoSwapWithAsuna(p, unit); },
+    async onAnyUnblockedAttack(G, p, atk, unit) { if (atk === unit) await kiritoSwapWithAsuna(p, unit); },
+    async onMain(G, p, unit) {
+      if (unit._swapTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (await swapAcrossLines(p, unit, unit.card.name, false)) unit._swapTurn = Engine.G.turn;
+    },
+    mainLabel: 'สลับตำแหน่ง Front ↔ Energy',
+  };
+
+  // 1-060 Leafa — [Main][When in Frontline][1 Per Turn] return 1 other character on your area to
+  // your hand; if you did, set a Trait:ALO character active and give it +1000 BP this turn.
+  reg['SAO-1-060'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._aloTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const others = [...p.front, ...p.energy].filter(u => u !== unit);
+      if (!others.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, others, `${unit.card.name}: คืน character 1 ใบเข้ามือ`, true);
+      const t = others.find(u => u.uid === uid);
+      if (!t) return;
+      unit._aloTurn = Engine.G.turn;
+      await Engine.returnUnitToHand(p, t);
+      const targets = [...p.front, ...p.energy].filter(alo);
+      if (!targets.length) return;
+      const tu = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก ALO ตั้งขึ้น +1000 BP`, true);
+      const a = targets.find(u => u.uid === tu);
+      if (!a) return;
+      a.rested = false;
+      a.bpMod += 1000;
+      log(`${a.card.name}: ตั้งขึ้นและได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'คืน character เข้ามือ → ตั้ง ALO +1000 BP',
+  };
+
+  // 1-062 World Tree — [Main][Rest this card] return 1 Trait:ALO character on your area to your
+  // hand; if you did, give any 1 character (either side) +1000 BP this turn.
+  reg['SAO-1-062'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const targets = [...p.front, ...p.energy].filter(alo);
+      if (!targets.length) { p.controller.notify?.('ไม่มี character ALO'); return; }
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: คืน ALO 1 ใบเข้ามือ`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      unit.rested = true;
+      await Engine.returnUnitToHand(p, t);
+      const enemy = Engine.opponentOf(p);
+      const all = [...p.front, ...p.energy, ...enemy.front, ...enemy.energy];
+      if (!all.length) return;
+      const bu = await p.controller.chooseOwnCharacter(p, all, `${unit.card.name}: เลือก character ให้ +1000 BP`, true);
+      const b = all.find(u => u.uid === bu);
+      if (!b) return;
+      b.bpMod += 1000;
+      log(`${b.card.name}: ได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'คืน ALO เข้ามือ → +1000 BP',
+  };
+
+  // 1-080 Yuuki — [When Attacking] if an Asuna/Siune/Sleeping Knights is on your area, draw 1 and
+  // place 1 card from your hand to the Outside Area.
+  reg['SAO-1-080'] = {
+    async onAttack(G, p, unit) {
+      if (!hasNamed(p, /Asuna|Siune|Sleeping Knights/)) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 1-087 Kirito — when another character on your area wins a battle, this character gains
+  // [Damage (2)] during this turn; [Main][1 Per Turn] give another character +1000 BP this turn.
+  reg['SAO-1-087'] = {
+    onAnyWinBattle(G, p, atk, enemy, defender, unit) {
+      if (atk === unit || unit._dmgTurn === Engine.G.turn) return;
+      unit._dmgTurn = Engine.G.turn;
+      unit.tempDmg = (unit.tempDmg || 0) + 1;
+      log(`${unit.card.name}: ได้ [Damage (2)] เทิร์นนี้`);
+    },
+    async onMain(G, p, unit) {
+      if (unit._buffTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._buffTurn = Engine.G.turn;
+      await H.buffOwnCharacter(p, 1000, { excludeUnit: unit });
+    },
+    mainLabel: 'ให้ character อื่น +1000 BP',
+  };
+
+  // 1-091 Sinon — [On Play] gains [Sniper] this turn; when this character attacks and wins a
+  // battle, scry 2 (remainder to the bottom) and give another character +1000 BP this turn.
+  reg['SAO-1-091'] = {
+    onPlay(G, p, unit) { unit.tempSnipe = true; log(`${unit.card.name}: ได้ [Sniper] เทิร์นนี้`); },
+    async onWinBattle(G, p, unit) {
+      // scryTop decides one card at a time, so the "top 2" is two consecutive decisions
+      await H.scryTop(p, ['top', 'bottom']);
+      await H.scryTop(p, ['top', 'bottom']);
+      await H.buffOwnCharacter(p, 1000, { excludeUnit: unit });
+      return false;
+    },
+  };
+
+  // 1-101 Asuna — [1 Per Turn] if this character moves outside your Move Phase, it gains +1000 BP
+  // and [Impact (1)] during this turn.
+  reg['SAO-1-101'] = {
+    onAnyMove(G, p, moved, unit) {
+      if (moved !== unit || unit._moveBuffTurn === Engine.G.turn) return;
+      unit._moveBuffTurn = Engine.G.turn;
+      unit.bpMod += 1000;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ +1000 BP และ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 1-104 Kirito — [On Play] you may swap a Front Line and an Energy Line character (other than
+  // this one); if an Asuna is on your area, this character gains [Double Attack] during this turn.
+  reg['SAO-1-104'] = {
+    async onPlay(G, p, unit) {
+      await swapAcrossLines(p, unit, unit.card.name, true);
+      if (!hasNamed(p, /Asuna/)) return;
+      unit.tempDoubleAttack = true;
+      log(`${unit.card.name}: ได้ [Double Attack] เทิร์นนี้`);
+    },
+  };
 })();
