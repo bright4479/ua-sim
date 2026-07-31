@@ -1207,7 +1207,7 @@
   const RX_TIER_HEAD = /gains (?:all )?(?:(?:the following )?effects? based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
   // the bullet marker is frequently missing in the data, and the threshold is written with an
   // optional "BP " prefix and an optional trailing noun ("4 or more cards:")
-  const RX_TIER_BULLET = /^[•·・*]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
+  const RX_TIER_BULLET = /^[•·・*-]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
 
   // "<X> in your Outside Area" and friends -> (owner, unit) => count
   function parseTierBase(text) {
@@ -1249,7 +1249,7 @@
       };
     }
     if (/^face-down cards? under this character$/i.test(text)) return (owner, unit) => (unit.counters || []).length;
-    if (/^this character'?s BP$/i.test(text)) return (owner, unit) => Engine.bp(unit);
+    if (/^(?:this character'?s|its) BP$/i.test(text)) return (owner, unit) => Engine.bp(unit);
     if (/^your generated energy$/i.test(text)) return owner => Engine.energyGen(owner)?.total ?? 0;
     return null;
   }

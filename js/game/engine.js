@@ -157,7 +157,8 @@ const Engine = (() => {
     const passiveSegs = fxStatic.split('@').filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s));
     if (passiveSegs.some(s => /opponent(?:'?s)? must block this character(?:'?s)? attacks?/i.test(s))) kw.mustBeBlocked = true;
     if (passiveSegs.some(s => /this character must block (?:your )?op(?:'s|ponent'?s)?/i.test(s))) kw.mustBlock = true;
-    const snipeCap = fxStatic.match(/\[Sniper?\][^.]*cannot target characters? with BP\s*(\d+) or more/i);
+    // the [Sniper] tag may sit in an earlier clause than the restriction, so it is not required here
+    const snipeCap = fxStatic.match(/cannot target characters? with BP\s*(\d+) or (?:more|higher)/i);
     if (snipeCap) kw.snipeMaxBP = parseInt(snipeCap[1]);
     // "This card is also treated as <NAME>" (alternate identity for Raid-target name matching)
     const treated = fx.matchAll(/This (?:card|character) (?:is )?also treated as <([^>]+)>/gi);
@@ -320,7 +321,8 @@ const Engine = (() => {
   // handled generically here rather than per-card.
   const RX_SELF_GEN_WHEN_ACTIVE = [
     /If this character is active, increase this character'?s generated energy by (\d+)/i,
-    /If this (?:character|card) is active, increase the energy it generates by (\d+)/i,
+    // the colour tag and the "+" are both optional: "increase the energy it generates [yellow] by +1"
+    /If this (?:character|card) is active, increase the energy it generates\s*(?:\[\w+\])?\s*by \+?(\d+)/i,
     /If this character is active, this character generates addition\w* \+?(\d+)/i,
     /If this character is active, this character generates (\d+) addition\w*/i,
   ];
@@ -379,7 +381,7 @@ const Engine = (() => {
     }
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
-    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
+    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
@@ -393,6 +395,18 @@ const Engine = (() => {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       if ([...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()))) delta -= parseInt(m[3]);
+    }
+    // "If there are N or less cards on your Outside Area, this card's energy requirement is reduced by M."
+    m = fx.match(/If there are (\d+) or less cards on your Outside Area, this card'?s energy requirement is reduced by (\d+)/i);
+    if (m && p.sideline.length <= parseInt(m[1])) delta -= parseInt(m[2]);
+    // "If there are characters with N or more different Traits on your area, reduce this card's
+    // energy requirement in your hand by M."
+    m = fx.match(/If there are characters with (\d+) or more different Traits on your area, reduce this card'?s energy requirement in your hand by (\d+)/i);
+    if (m) {
+      const traits = new Set();
+      for (const u of [...p.front, ...p.energy])
+        for (const t of (u.card.traits || '').split('/')) if (t.trim()) traits.add(t.trim().toLowerCase());
+      if (traits.size >= parseInt(m[1])) delta -= parseInt(m[2]);
     }
     // CGH puts the zone last: "If your opponent has a [purple] or [red] card, reduce this card's
     // required energy by 1 in your hand."
@@ -463,9 +477,11 @@ const Engine = (() => {
     const fx = card.effect || '';
     return /Reduce the required energy of this card in your hand(?: and Outside Area)? by \d+/i.test(fx) ||
       /If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by \d+/i.test(fx) ||
-      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
+      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
       /If there is an? \[?\w+\]? (?:or (?:an? )?\[?\w+\]? )?[Cc]ard on your opponent'?s (?:area|field), reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /^(?:\d+\s*)?Reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
+      /If there are \d+ or less cards on your Outside Area, this card'?s energy requirement is reduced by \d+/i.test(fx) ||
+      /If there are characters with \d+ or more different Traits on your area, reduce this card'?s energy requirement in your hand by \d+/i.test(fx) ||
       /If your opponent has a? ?\[?\w+\]? ?(?:or \[?\w+\]? )?[Cc]ard(?: on their field)?, ?(?:You can )?reduce this card'?s (?:energy consumption|required energy) by \d+ ?(?:\[\w+\])? ?in your hand/i.test(fx) ||
       /For every \w+ cards? in your outside area, reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||

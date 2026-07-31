@@ -791,4 +791,324 @@
       log(`${unit.card.name}: Komiya Kaho ใบถัดไป ลด AP cost 1`);
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const lineOf = (p, u) => (p.front.includes(u) ? p.front : p.energy);
+  const aloneAwake = (p, unit) => !lineOf(p, unit).some(u => u !== unit && u.rested);
+  const sameLineHas = (p, unit, re) => lineOf(p, unit).some(u => u !== unit && re.test(u.card.name || ''));
+
+  // move N cards matching a trait from the Outside Area to the bottom of the deck; returns whether
+  // the full cost was paid (IMS-2-034 and IMS-2-038 both open with this)
+  async function outsideTraitToDeckBottom(p, unit, trait, n, prompt) {
+    const idx = p.sideline.map((no, i) => [no, i]).filter(([no]) => (byNo(no)?.traits || '').toLowerCase().includes(trait.toLowerCase())).map(([, i]) => i);
+    if (idx.length < n) return false;
+    const ok = await p.controller.chooseOption(p, `${unit.card.name}: ${prompt}`,
+      [{ label: `ส่ง ${n} ใบลงใต้เด็ค`, value: true }, { label: 'ข้าม', value: false }]);
+    if (!ok) return false;
+    for (const i of idx.slice(0, n).sort((a, b) => b - a)) p.deck.push(p.sideline.splice(i, 1)[0]);
+    log(`${unit.card.name}: ส่ง ${trait} ${n} ใบจาก Outside Area ลงใต้เด็ค`);
+    return true;
+  }
+
+  // look at the top N and take one matching card, remainder to the bottom of the deck
+  async function lookTopThen(p, unit, n, fits, title, place) {
+    const revealed = p.deck.splice(0, n);
+    if (!revealed.length) return;
+    const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: ${title}`, c => fits(c), 1);
+    const chosen = picked?.length ? revealed[picked[0]] : null;
+    if (chosen) {
+      revealed.splice(revealed.indexOf(chosen), 1);
+      if (place) { p.deck.unshift(chosen); await Engine.playCardFromZone(p, chosen, 'deck', { line: 'front', active: false }); }
+      else { p.hand.push(chosen); log(`${unit.card.name}: เพิ่ม ${byNo(chosen)?.name} เข้ามือ`); }
+    }
+    for (const no of revealed) p.deck.push(no);
+  }
+
+  // 1-004 Osaki Amana — [When Attacking] move up to 2 cards from your Outside Area to the Remove
+  // Area; if your Outside Area ends up empty, draw 1.
+  // 1-007 Osaki Tenka — the same at [On Play], with 3 cards.
+  async function outsideToRemovalThenDraw(p, unit, n) {
+    for (let i = 0; i < n && p.sideline.length; i++) p.removal.push(p.sideline.shift());
+    log(`${unit.card.name}: ส่งการ์ดจาก Outside Area ไป Remove Area`);
+    if (p.sideline.length) return;
+    Engine.draw(p, 1);
+    log(`${unit.card.name}: Outside Area ว่าง → จั่ว 1 ใบ`);
+  }
+  reg['IMS-1-004'] = { async onAttack(G, p, unit) { await outsideToRemovalThenDraw(p, unit, 2); } };
+  reg['IMS-1-007'] = { async onPlay(G, p, unit) { await outsideToRemovalThenDraw(p, unit, 3); } };
+
+  // 1-013 Kazano Hiori — [When Attacking] reveal the top card; keep it if it is an Illumination
+  // STARS card, otherwise put it back on top or on the bottom.
+  reg['IMS-1-013'] = {
+    async onAttack(G, p, unit) {
+      if (!p.deck.length) return;
+      const no = p.deck[0], c = byNo(no);
+      if ((c?.traits || '').includes('Illumination STARS')) {
+        p.deck.shift();
+        p.hand.push(no);
+        log(`${unit.card.name}: เปิดเจอ ${c.name} → เข้ามือ`);
+        return;
+      }
+      await H.scryTop(p, ['top', 'bottom']);
+    },
+  };
+
+  // 1-019 Hachimiya Meguru — [Your Turn] an opponent's character that loses a battle to this one
+  // goes to the Remove Area instead of being retired; [On Play] gains [Sniper] this turn.
+  reg['IMS-1-019'] = {
+    onWinBattle: H.battleLoserGoesTo('removal'),
+    onPlay(G, p, unit) { unit.tempSnipe = true; log(`${unit.card.name}: ได้ [Sniper] เทิร์นนี้`); },
+  };
+
+  // 1-025 Nanakusa Nichika — [On Play] if 3+ other characters with different traits are on your
+  // area, draw 2.
+  reg['IMS-1-025'] = {
+    onPlay(G, p, unit) {
+      const traits = new Set();
+      for (const u of [...p.front, ...p.energy]) {
+        if (u === unit) continue;
+        for (const t of (u.card.traits || '').split('/')) if (t.trim()) traits.add(t.trim().toLowerCase());
+      }
+      if (traits.size < 3) return;
+      Engine.draw(p, 2);
+      log(`${unit.card.name}: จั่ว 2 ใบ`);
+    },
+  };
+
+  // 1-042 Tsukioka Kogane — when this character attacks unblocked, draw 1.
+  reg['IMS-1-042'] = {
+    onAnyUnblockedAttack(G, p, atk, unit) {
+      if (atk !== unit) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: โจมตีไม่ถูกบล็อก → จั่ว 1 ใบ`);
+    },
+  };
+
+  // 1-045 Mitsumine Yuika — [When Attacking] an enemy Front Line character with BP 1500 or higher
+  // gets -1000 BP this turn.
+  reg['IMS-1-045'] = {
+    async onAttack(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => Engine.bp(u) >= 1500);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, targets, `${unit.card.name}: เลือก character ศัตรู (BP ≥1500) รับ -1000 BP`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.bpMod -= 1000;
+      log(`${t.card.name}: -1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 1-051 Asakura Toru — [When Attacking] if you used 4+ cards from hand this turn, gains
+  // [Impact (1)]; untargetable while a Higuchi Madoka shares its line.
+  reg['IMS-1-051'] = {
+    onAttack(G, p, unit) {
+      if ((p._cardsPlayedFromHandThisTurn || 0) < 4) return;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+    // the [Opponent's Turn] "cannot be chosen while a Higuchi Madoka shares this line" clause is
+    // left unscripted: untargetability is read as a static flag, with no live-conditional hook.
+  };
+
+  // 1-057 Higuchi Madoka — [On Play] if you used 3+ other cards this turn, draw 3 and discard 1;
+  // [On Retire] with an Asakura Toru on the same line, rest an enemy Front Line character.
+  reg['IMS-1-057'] = {
+    async onPlay(G, p, unit) {
+      if ((p._cardsPlayedFromHandThisTurn || 0) < 4) return;   // this card is one of them
+      Engine.draw(p, 3);
+      log(`${unit.card.name}: จั่ว 3 ใบ`);
+      await H.discardFromHand(p);
+    },
+    async onSideline(G, p, unit) {
+      if (!sameLineHas(p, unit, /Asakura Toru/)) return;
+      await H.restEnemyFront(p);
+    },
+  };
+
+  // 1-060 Fukumaru Koito — draw 1 when this character's attack is blocked; [On Retire] with an
+  // Ichikawa Hinana on the same line, return its raid source to hand.
+  reg['IMS-1-060'] = {
+    // onBeingBlocked fires on the ATTACKER's own registry entry, so atk is always this unit
+    onBeingBlocked(G, p, atk) {
+      Engine.draw(p, 1);
+      log(`${atk.card.name}: ถูกบล็อก → จั่ว 1 ใบ`);
+    },
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving === unit) unit._raidSource = unit.under.slice();
+      return false;
+    },
+    onSideline(G, p, unit) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      if (!src.length || !sameLineHas(p, unit, /Ichikawa Hinana/)) return;
+      const i = p.sideline.lastIndexOf(src[0]);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(src[0]);
+      log(`${unit.card.name}: ${byNo(src[0])?.name} กลับเข้ามือ`);
+    },
+  };
+
+  // 1-074 Serizawa Asahi — [Your Turn] +1000 BP for each Event used this turn. (The BP tiers below
+  // it are handled by the generic tier evaluator.)
+  reg['IMS-1-074'] = {
+    bpBonus(p, unit) { return isYourTurn(p) ? 1000 * (p._eventsUsedThisTurn || 0) : 0; },
+  };
+
+  // 1-077 Mayuzumi Fuyuko — [On Play] move any number of Event cards from your Outside Area to the
+  // Remove Area, then retire an enemy Front Line character with BP up to 1000 per card moved.
+  reg['IMS-1-077'] = {
+    async onPlay(G, p, unit) {
+      const events = p.sideline.filter(no => byNo(no)?.type === 'Event');
+      if (!events.length) return;
+      const opts = [];
+      for (let n = events.length; n >= 1; n--) opts.push({ label: `ส่ง ${n} ใบ (retire BP ≤${n * 1000})`, value: n });
+      opts.push({ label: 'ข้าม', value: 0 });
+      const n = await p.controller.chooseOption(p, `${unit.card.name}: ส่ง Event ไป Remove Area กี่ใบ?`, opts);
+      if (!n) return;
+      for (let i = 0; i < n; i++) {
+        const j = p.sideline.findIndex(no => byNo(no)?.type === 'Event');
+        if (j < 0) break;
+        p.removal.push(p.sideline.splice(j, 1)[0]);
+      }
+      log(`${unit.card.name}: ส่ง Event ${n} ใบไป Remove Area`);
+      await H.retireEnemyFront(p, n * 1000);
+    },
+  };
+
+  // 1-080 Arisugawa Natsuha — [On Play] give a Houkago Climax Girls card [Double Attack] this turn.
+  reg['IMS-1-080'] = {
+    async onPlay(G, p, unit) {
+      const targets = [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Houkago Climax Girls'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือกการ์ดรับ [Double Attack]`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.tempDoubleAttack = true;
+      log(`${t.card.name}: ได้ [Double Attack] เทิร์นนี้`);
+    },
+  };
+
+  // 1-083 Komiya Kaho / 1-086 Saijo Juri — [When Attacking] with no other rested character on the
+  // same line, gain BP and a keyword this turn.
+  reg['IMS-1-083'] = {
+    onAttack(G, p, unit) {
+      if (!aloneAwake(p, unit)) return;
+      unit.bpMod += 500;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ +500 BP และ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+  reg['IMS-1-086'] = {
+    onAttack(G, p, unit) {
+      if (!aloneAwake(p, unit)) return;
+      unit.bpMod += 1000;
+      unit.tempDmg = (unit.tempDmg || 0) + 1;
+      log(`${unit.card.name}: ได้ +1000 BP และ [Damage (2)] เทิร์นนี้`);
+    },
+  };
+
+  // 1-088 Sonoda Chiyoko — [When in Energy Line] you may move to the Front Line at the end of your
+  // Attack Phase.
+  reg['IMS-1-088'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.energy.includes(unit) || p.front.length >= 4) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ย้ายไป Front Line?`,
+        [{ label: 'ย้าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (ok) await Engine.moveUnitFree(p, unit, 'front');
+    },
+  };
+
+  // 1-092 Morino Rinze — [When Attacking] with no other rested character on the same line, play a
+  // Houkago Climax Girls character (need <=3, AP 1) from your hand rested.
+  reg['IMS-1-092'] = {
+    async onAttack(G, p, unit) {
+      if (!aloneAwake(p, unit)) return;
+      const i = p.hand.findIndex(no => {
+        const c = byNo(no);
+        return c && c.type === 'Character' && (c.traits || '').includes('Houkago Climax Girls') && (c.need || 0) <= 3 && (c.ap || 0) === 1;
+      });
+      if (i < 0) return;
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+    },
+  };
+
+  // 1-105 Sakuragi Mano — [When Attacking] another Illumination Stars card gets +2000 BP this turn.
+  reg['IMS-1-105'] = {
+    async onAttack(G, p, unit) {
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').toLowerCase().includes('illumination stars'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Illumination Stars รับ +2000 BP`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.bpMod += 2000;
+      log(`${t.card.name}: ได้ +2000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-010 Meguru Hachimiya — [On Play] you may rest an active Front Line character to set another
+  // Illumination STARS card active.
+  reg['IMS-2-010'] = {
+    async onPlay(G, p, unit) {
+      const awake = p.front.filter(u => !u.rested && u !== unit);
+      if (!awake.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, awake, `${unit.card.name}: วางนอน character 1 ใบ?`, true);
+      const t = awake.find(u => u.uid === uid);
+      if (!t) return;
+      t.rested = true;
+      log(`${t.card.name}: วางนอน`);
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && u.rested && (u.card.traits || '').toLowerCase().includes('illumination stars'));
+      if (!targets.length) return;
+      const au = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Illumination STARS ตั้งขึ้น`, true);
+      const a = targets.find(u => u.uid === au);
+      if (!a) return;
+      a.rested = false;
+      log(`${a.card.name}: ตั้งขึ้น`);
+    },
+  };
+
+  // 2-034 Tenka Osaki / 2-038 Chiyuki Kuwayama — [On Play] send ALSTROEMERIA cards from your
+  // Outside Area to the bottom of your deck for a payoff.
+  reg['IMS-2-034'] = {
+    async onPlay(G, p, unit) {
+      if (!await outsideTraitToDeckBottom(p, unit, 'ALSTROEMERIA', 5, 'ส่ง ALSTROEMERIA 5 ใบลงใต้เด็คเพื่อจั่ว 2?')) return;
+      Engine.draw(p, 2);
+      log(`${unit.card.name}: จั่ว 2 ใบ`);
+    },
+  };
+  reg['IMS-2-038'] = {
+    async onPlay(G, p, unit) {
+      if (!await outsideTraitToDeckBottom(p, unit, 'ALSTROEMERIA', 4, 'ส่ง ALSTROEMERIA 4 ใบลงใต้เด็คเพื่อรับ [Sniper]?')) return;
+      unit.tempSnipe = true;
+      log(`${unit.card.name}: ได้ [Sniper] เทิร์นนี้`);
+    },
+  };
+
+  // 2-049 Yuika Mitsumine — [On Play] look at the top 5 and play a purple L'Antica card (need <=2,
+  // AP 1) rested; [1 Per Turn] mill 1 when this character attacks unblocked.
+  reg['IMS-2-049'] = {
+    async onPlay(G, p, unit) {
+      await lookTopThen(p, unit, 5, c => c.type === 'Character' && (c.color || '').toLowerCase() === 'purple' &&
+        (c.traits || '').includes("L'Antica") && (c.need || 0) <= 2 && (c.ap || 0) === 1,
+        'เลือกลงสนามแบบนอน', true);
+    },
+    onAnyUnblockedAttack(G, p, atk, unit) {
+      if (atk !== unit || unit._millTurn === Engine.G.turn || !p.deck.length) return;
+      unit._millTurn = Engine.G.turn;
+      p.sideline.push(p.deck.shift());
+      log(`${unit.card.name}: ส่งการ์ดบนสุด 1 ใบไป Outside Area`);
+    },
+  };
+
+  // 2-066 Fuyuko Mayuzumi — [When Attacking] look at the top 3 and add a red Straylight or Event
+  // card with required energy 4 or less to your hand.
+  reg['IMS-2-066'] = {
+    async onAttack(G, p, unit) {
+      await lookTopThen(p, unit, 3, c => (c.color || '').toLowerCase() === 'red' &&
+        ((c.traits || '').includes('Straylight') || c.type === 'Event') && (c.need || 0) <= 4,
+        'เลือกการ์ดเข้ามือ', false);
+    },
+  };
 })();
