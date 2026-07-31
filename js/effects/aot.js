@@ -603,4 +603,102 @@
       else if (v === 'b') { Engine.draw(p, 1); log(`${card.name}: จั่ว 1 ใบ`); }
     },
   };
+
+  // ---------- 2026-07-26: residual pass (bonus text alongside working keywords) ----------
+  const eventsInSideline = p => p.sideline.filter(no => byNo(no)?.type === 'Event').length;
+
+  // 014 Ymir (Jaw Titan) — [When Attacking][1 Per Turn] draw 1 and discard 1; then with 6 or more
+  // Event Cards in your Outside Area you may set this character to active.
+  reg['AOT-1-014'] = {
+    async onAttack(G, p, unit) {
+      if (unit._usedTurn === Engine.G.turn) return;
+      unit._usedTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+      if (eventsInSideline(p) < 6) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: ตั้งตัวเองขึ้น Active?`,
+        [{ label: 'ตั้งขึ้น', value: true }, { label: 'ข้าม', value: false }]);
+      if (v) { unit.rested = false; log(`${unit.card.name}: ตั้งขึ้น Active`); }
+    },
+  };
+
+  // 053 Annie Leonhart (Female Titan) — [On Play] free-play a green character (need<=3, ap1) from
+  // hand rested. @[On Retire] return up to 1 of this card's raid source cards to your hand.
+  // (Skipped: the "raiding a Marleyan Warrior costs 1 less" discount — the raid cost is computed
+  // before any per-unit hook can see it.)
+  reg['AOT-1-053'] = {
+    async onPlay(G, p, unit) {
+      const i = p.hand.findIndex(no => { const c = byNo(no); return c && c.type === 'Character' && c.color === 'Green' && (c.need || 0) <= 3 && (c.ap || 0) === 1; });
+      if (i < 0 || p.front.length >= 4) return;
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+    },
+    // the raid stack is emptied into the Outside Area before onSideline runs, so remember it here —
+    // onBeforeLeaveField fires ahead of any state change. Returning false lets the retire proceed.
+    onBeforeLeaveField(G, p, leaving, ctx, self) {
+      if (leaving === self) self._raidSource = self.under.slice();
+      return false;
+    },
+    async onSideline(G, p, unit, reason) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      if (!src.length) return;
+      const v = await p.controller.chooseOption(p, `${unit.card.name}: เอาการ์ดใต้ Raid State กลับเข้ามือ?`,
+        [{ label: 'เอากลับ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!v) return;
+      const no = src[0];
+      const i = p.sideline.lastIndexOf(no);   // pull it back out of the Outside Area
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(no);
+      log(`${unit.card.name}: ${byNo(no)?.name} กลับเข้ามือ`);
+    },
+  };
+
+  // 081 Sasha Braus — passive: with a <Trait: Ingredients> card played from your hand this turn,
+  // +500 BP and [Impact (1)].
+  reg['AOT-1-081'] = {
+    bpBonus(p, unit) {
+      return (Engine.G.players[Engine.G.active] === p && p._playedTraitsThisTurn?.has('ingredients')) ? 500 : 0;
+    },
+    impactBonus(p, unit) {
+      return (Engine.G.players[Engine.G.active] === p && p._playedTraitsThisTurn?.has('ingredients')) ? 1 : 0;
+    },
+  };
+
+  // 091 Eren Yeager — [Main][Frontline][1 Per Turn] move a card from your Life to your hand; if you
+  // did, +1000 BP this turn.
+  reg['AOT-1-091'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      const no = await H.addLifeToHand(p);
+      if (no == null) return;
+      unit._usedTurn = Engine.G.turn;
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 022 Historia Reiss — tiers on the number of Event Cards in your Outside Area. The 2+ and 6+
+  // tiers resolve here; the 4+ tier is an activated [Main] handled below.
+  reg['AOT-1-022'] = {
+    impactBonus(p, unit) { return eventsInSideline(p) >= 6 ? 1 : 0; },
+    async onAttack(G, p, unit) {
+      if (eventsInSideline(p) < 2) return;
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.traits || '').includes('104th Training Corps'));
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Trait:104th Training Corps`, true);
+      const t = targets.find(x => x.uid === uid);
+      if (t) { t.bpMod += 1000; log(`${unit.card.name}: ${t.card.name} +1000 BP เทิร์นนี้`); }
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (eventsInSideline(p) < 4) { p.controller.notify?.('ต้องมี Event Card 4 ใบขึ้นไปใน Outside Area'); return; }
+      if (unit._usedTurn === Engine.G.turn) { p.controller.notify?.('ใช้ไปแล้วเทิร์นนี้'); return; }
+      if (!(p._eventsUsedThisTurn > 0)) { p.controller.notify?.('ต้องใช้ Event Card เทิร์นนี้ก่อน'); return; }
+      unit._usedTurn = Engine.G.turn;
+      await H.apUntap(p, 1);
+    },
+  };
 })();

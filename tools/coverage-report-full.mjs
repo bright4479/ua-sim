@@ -75,18 +75,31 @@ const COST_DISCOUNT_RES = [
   /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)(?: on their field)?,?[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+(?: \[?\w+\]?)?(?: from your hand)?\.?/i,
   /If there is a <[^>]+> on your area, reduce the AP cost of this card in your hand by \d+\.?/i,
 ];
+// A clause the live generic evaluators already consume is not residual. Ask the real parsers one
+// clause at a time rather than duplicating their regexes here — that duplication is what produced
+// several rounds of false residuals before.
+function genericHandlesClause(cardNo, clause, i) {
+  const probe = { no: `${cardNo}#res${i}`, effect: clause };
+  return !!(Effects.hasGenericBp?.(probe) || Effects.hasGenericKeyword?.(probe) || Effects.hasGenericGen?.(probe));
+}
+
 function residualText(c) {
-  let t = c.effect || '';
+  let t = (c.effect || '').split('@')
+    .filter((clause, i) => !genericHandlesClause(c.no, clause, i))
+    .join('@');
   // cost-discount sentences must be matched BEFORE bracket tags are stripped — several of them key
   // off a "[yellow] or [blue] Card" colour token that would otherwise be gone by the time they run
   for (const re of COST_DISCOUNT_RES) t = t.replace(re, ' ');
   t = t.replace(/\[[^\]]*\]/g, ' ');                 // all bracket-tag keywords ([Step] [Raid] [Impact(2)] ...)
   t = t.replace(/<[^>]*>/g, ' ');                     // <NAME> / <Trait: X> tokens left dangling after tag strip
-  t = t.replace(/This (?:card|character) (?:is )?also treated as\s*\.?/gi, ' ');
+  t = t.replace(/This (?:card|character) (?:is )?(?:also )?treated as (?:both )?\s*(?:and\s*)?\.?/gi, ' ');
   t = t.replace(/This character (?:also |can )?generates? energy (?:on|when in) (?:your |the )?Front Line\.?/gi, ' ');
   t = t.replace(/cannot be chosen by (?:your opponent'?s )?(?:character'?s effect|event card(?: from hand)?|event'?s effect|effect)/gi, ' ');
+  // the conditional form is parsed into kw.entersActiveIf and works, so strip the gate too
+  t = t.replace(/If there is a character on your area that includes\s*<?[^>,]*>?\s*in its name,\s*/gi, ' ');
+  t = t.replace(/If there are \d+ or more\s*<?[^>,]*>?\s*cards? on your area,\s*(?=this (?:character|field) is played in active)/gi, ' ');
   t = t.replace(/(?:this character|this field|this card) is played in active\.?/gi, ' ');
-  t = t.replace(/Play this (?:field|site|character|card) (?:to your area )?(?:in active|set to active)\.?/gi, ' ');
+  t = t.replace(/Play this (?:field|site|character|card) (?:to your area |on your (?:field|area) )?(?:and )?(?:in active|set (?:it )?to active)\.?/gi, ' ');
   t = t.replace(/(?:This character )?cannot be blocked by characters? with (?:BP ?\d+|\d+ ?BP) or (?:less|lower|more|higher)\.?/gi, ' ');
   // whole sentences the engine already implements (selfGenBonus etc.) — matching only the opening
   // fragment left tails like "the energy it generates by 1" behind and reported false residuals

@@ -979,6 +979,11 @@
         rules.push({ when, cond, amount: parseInt(m[5]) });
         continue;
       }
+      // "If there are <A> and <B> on your area, this character gets +N BP." — all names at once
+      if ((m = rest.match(/^If there (?:are|is) <([^>]+)> and <([^>]+)>(?: and <([^>]+)>)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+        rules.push({ when, cond: { allNames: [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim()), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
+        continue;
+      }
       // "If you have N or more cards in your hand, this character gets +N BP."
       if ((m = rest.match(/^If you have (\d+) or more cards in your hand, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
@@ -1013,6 +1018,7 @@
         continue;
       }
     }
+    rules.push(...parseTierRules(card).bp);
     if (!rules.length) return null;
     return (owner, unit) => {
       const myTurn = Engine.G.players[Engine.G.active] === owner;
@@ -1021,7 +1027,9 @@
         if (r.when === 'my' && !myTurn) continue;
         if (r.when === 'opp' && myTurn) continue;
         if (r.cond) {
-          if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
+          if (r.cond.tier) { if (!r.cond.tier(owner, unit)) continue; }
+          else if (r.cond.allNames) { if (!allNamesPresent(r.cond.allNames, r.cond.zone)(owner, unit)) continue; }
+          else if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
           else if (r.cond.nameOrTrait) { if (countNameOrTrait(owner, unit, { ...r.cond.nameOrTrait, zone: r.cond.zone }) < r.cond.n) continue; }
           else if (r.cond.oppLifeMax != null) { if ((Engine.opponentOf(owner).life || []).length > r.cond.oppLifeMax) continue; }
@@ -1054,8 +1062,18 @@
   // printed unconditionally, so parseKeywords must not set it; instead it is evaluated live here
   // through the engine's impactBonus / dmgBonus hooks. Roughly 13% of all cards whose bonus text
   // was previously unscripted are this shape.
+  // "If there are <A> and <B> on your area" — every listed name must be present at once. Both the
+  // BP evaluator and the keyword evaluator use it, so the matcher lives here.
+  const RX_ALL_NAMES = /^If there (?:are|is) <([^>]+)> and <([^>]+)>(?: and <([^>]+)>)? (?:on|in) your (area|field|Front Line)$/i;
+  const allNamesPresent = (names, zone) => (owner, unit) =>
+    names.every(n => countMatching(owner, unit, { name: n, zone }) >= 1);
+
   function parseKeywordCondition(text) {
     let m;
+    if ((m = text.match(RX_ALL_NAMES))) {
+      const names = [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim());
+      return allNamesPresent(names, parseZone(m[4]));
+    }
     if ((m = text.match(/^If (?:there is|you have) an? <([^>]+)> (?:on your area|in your field|on your field)$/i))) {
       const name = m[1].trim();
       return (owner, unit) => countMatching(owner, unit, { name }) >= 1;
@@ -1147,9 +1165,105 @@
     return null;
   }
 
+  // ---------- tier lists ("gains all the following effects based on the number of X") ----------
+  // A head clause names something to count, then bullet clauses gate effects on that count:
+  //   This character gains all the following effects based on the number of <Yuuki> ... in your Outside Area.
+  //   @• 4 or more: [Your Turn] This character gets +500 BP.
+  //   @• 6 or more: [Impact (1)]
+  // Each bullet is desugared into the same rule shape the BP and keyword evaluators already use,
+  // so the tiers ride on those evaluators instead of needing a third one. ~45 cards use this shape.
+  const RX_TIER_HEAD = /gains all the following effects based on (?:the )?(?:number of |different types of )?(.*?)[.:]?\s*$/i;
+  // the bullet marker is frequently missing in the data, and the threshold is written with an
+  // optional "BP " prefix and an optional trailing noun ("4 or more cards:")
+  const RX_TIER_BULLET = /^[•·・*]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
+
+  // "<X> in your Outside Area" and friends -> (owner, unit) => count
+  function parseTierBase(text) {
+    let m;
+    // the qualifier often trails the zone ("<A>, <B> and <C> card on your area with different
+    // names"), so lift it out before the zone anchors below run
+    const distinctTrail = /\bwith different (?:names|types)\b/i.test(text);
+    text = text.replace(/\s*\bwith different (?:names|types)\b\s*/i, ' ').trim();
+    const names = () => (text.match(/<[^>]+>/g) || []).map(s => s.slice(1, -1).trim()).filter(n => !/^Trait:?/i.test(n));
+    const traits = () => (text.match(/<Trait:?\s*([^>]+)>/gi) || []).map(s => s.replace(/^<Trait:?\s*|>$/gi, '').trim().toLowerCase());
+    const zoneOf = z => ({ 'outside area': 'sideline', 'remove area': 'removal', 'life area': 'life' })[z.toLowerCase()];
+    const distinct = distinctTrail;
+
+    if ((m = text.match(/^(?:Event )?[Cc]ards? (?:on|in) your (Outside Area|Remove Area|Life Area)$/i))) {
+      const zone = zoneOf(m[1]), onlyEvents = /^Event/i.test(text);
+      return owner => owner[zone].filter(no => !onlyEvents || UAData.byNo.get(no)?.type === 'Event').length;
+    }
+    // named / trait cards counted in a hidden zone
+    if (/(?:on|in) your (Outside Area|Remove Area|Life Area)$/i.test(text)) {
+      const zone = zoneOf(text.match(/(Outside Area|Remove Area|Life Area)$/i)[1]);
+      const ns = names(), ts = traits();
+      if (!ns.length && !ts.length) return null;
+      return owner => {
+        const hits = owner[zone].map(no => UAData.byNo.get(no)).filter(c => c &&
+          (ns.some(n => (c.name || '').includes(n)) || ts.some(t => (c.traits || '').toLowerCase().includes(t))));
+        return distinct ? new Set(hits.map(c => c.name)).size : hits.length;
+      };
+    }
+    // named / trait characters counted on the board
+    if (/(?:on|in) your (?:area|field|Front Line)$/i.test(text)) {
+      const front = /Front Line$/i.test(text);
+      const ns = names(), ts = traits();
+      if (!ns.length && !ts.length) return null;
+      return owner => {
+        const pool = front ? owner.front : [...owner.front, ...owner.energy];
+        const hits = pool.filter(u => ns.some(n => (u.card.name || '').includes(n)) ||
+          ts.some(t => (u.card.traits || '').toLowerCase().includes(t)));
+        return distinct ? new Set(hits.map(u => u.card.name)).size : hits.length;
+      };
+    }
+    if (/^face-down cards? under this character$/i.test(text)) return (owner, unit) => (unit.counters || []).length;
+    if (/^this character'?s BP$/i.test(text)) return (owner, unit) => Engine.bp(unit);
+    if (/^your generated energy$/i.test(text)) return owner => Engine.energyGen(owner)?.total ?? 0;
+    return null;
+  }
+
+  // the text after "N or more:" — reuses the same keyword vocabulary as buildKeywordEvaluator
+  function parseTierBody(text) {
+    const out = [];
+    let when = 'always', rest = text.trim(), m;
+    if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
+    else if ((m = rest.match(/^\[Opponent'?s Turn\]\s*(.*)$/i))) { when = 'opp'; rest = m[1]; }
+    if ((m = rest.match(/this character (?:gets|gains)\s*\+(\d+) ?BP/i))) out.push({ bp: true, when, amount: parseInt(m[1]) });
+    for (const km of rest.matchAll(/\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]\d]*(\d*)[^\]]*\]/gi)) {
+      const raw = km[1].toLowerCase(), n = km[2] ? parseInt(km[2]) : 1;
+      if (raw === 'impact') out.push({ when, kind: 'impact', amount: n });
+      else if (raw === 'damage') out.push({ when, kind: 'damage', amount: Math.max(1, n) - 1 });
+      else if (raw.startsWith('snipe')) out.push({ when, kind: 'snipe', flag: true });
+      else if (raw === 'double attack') out.push({ when, kind: 'doubleAttack', flag: true });
+      else if (raw === 'double block') out.push({ when, kind: 'doubleBlock', flag: true });
+      else out.push({ when, kind: 'nullifyImpact', flag: true });
+    }
+    return out;
+  }
+
+  function parseTierRules(card) {
+    const segs = (card.effect || '').split('@').map(s => normalizeFx(s.trim()));
+    const head = segs.findIndex(s => /gains all the following effects based on/i.test(s));
+    if (head < 0) return { bp: [], kw: [] };
+    const count = parseTierBase((segs[head].match(RX_TIER_HEAD) || [])[1]?.trim() || '');
+    if (!count) return { bp: [], kw: [] };
+    const bp = [], kw = [];
+    for (let i = head + 1; i < segs.length; i++) {
+      const m = segs[i].match(RX_TIER_BULLET);
+      if (!m) continue;
+      const need = parseInt(m[1]), atLeast = /more|higher/i.test(m[2]);
+      const cond = (owner, unit) => { const c = count(owner, unit); return atLeast ? c >= need : c <= need; };
+      for (const b of parseTierBody(m[3])) {
+        if (b.bp) bp.push({ when: b.when, cond: { tier: cond }, amount: b.amount });
+        else kw.push({ when: b.when, cond, kind: b.kind, amount: b.amount, flag: b.flag });
+      }
+    }
+    return { bp, kw };
+  }
+
   const kwEvalCache = new Map();
   function buildKeywordEvaluator(card) {
-    const rules = [];
+    const rules = parseTierRules(card).kw;
     for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
       let when = 'always', rest = clause, m;
       if ((m = rest.match(/^\[Your Turn\]\s*(.*)$/i))) { when = 'my'; rest = m[1]; }
@@ -1158,7 +1272,7 @@
       // that costed or multi-step abilities (which resolve elsewhere) are not swept up here.
       // the grant may be compound ("gains +500 BP and [Impact (1)]"); the BP half is handled
       // separately by the passive-BP evaluator, so only the keyword is taken here
-      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]]*?(\d*)\s*\]\.?$/i);
+      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]\d]*(\d*)[^\]]*\]\.?$/i);
       if (!m) continue;
       const cond = parseKeywordCondition(m[1].trim());
       if (!cond) continue;
