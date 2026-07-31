@@ -537,4 +537,216 @@
       }
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  // "This character cannot be removed from the field by your opponent's effect." — the replacement
+  // hook fires ahead of any state change, so returning true simply cancels the removal. It must
+  // NOT cancel a BP-0 removal or a lost battle, which are rules, not opponent effects.
+  const immuneToRemoval = {
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving !== unit || !ctx.byOpponent) return false;
+      if (ctx.reason === 'bp0' || ctx.reason === 'battle') return false;
+      log(`${unit.card.name}: ไม่ถูกนำออกจากสนามด้วยเอฟเฟกต์ฝ่ายตรงข้าม`);
+      return true;
+    },
+  };
+
+  // return this character to hand once the battle it blocked in is over
+  async function returnSelfAfterBlocking(p, unit) {
+    if (!p.front.includes(unit) && !p.energy.includes(unit)) return;
+    await Engine.returnUnitToHand(p, unit);
+    log(`${unit.card.name}: กลับเข้ามือหลังจบ battle ที่บล็อก`);
+  }
+
+  // 1-007 Genos — [On Retire] if retired by losing a battle, set a character on your field active.
+  reg['UA35BT-OPM-1-007'] = {
+    async onSideline(G, p, unit, reason) {
+      if (reason !== 'battle') return;
+      const targets = [...p.front, ...p.energy].filter(u => u.rested);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character ตั้งขึ้น`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.rested = false;
+      log(`${t.card.name}: ตั้งขึ้น`);
+    },
+  };
+
+  // 1-015 Terrible Tornado — [Main][When in Frontline][1 Per Turn] the next Event card you use from
+  // your hand this turn costs 1 less AP.
+  reg['UA35BT-OPM-1-015'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._apDiscountTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._apDiscountTurn = Engine.G.turn;
+      p.pendingDiscount = { predicate: c => c.type === 'Event', apDelta: -1 };
+      log(`${unit.card.name}: Event ใบถัดไปลด AP 1`);
+    },
+    mainLabel: 'ลด AP ของ Event ใบถัดไป 1',
+  };
+
+  // 1-025 The Blizzard Bunch — [Main][Rest this card] usable only if you used an Event card this
+  // turn; all characters on your field get +1000 BP this turn.
+  reg['UA35BT-OPM-1-025'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      if (!p._eventsUsedThisTurn) { p.controller.notify?.('ต้องใช้ Event Card ก่อนในเทิร์นนี้'); return; }
+      unit.rested = true;
+      for (const u of [...p.front, ...p.energy]) u.bpMod += 1000;
+      log(`${unit.card.name}: character ทั้งหมดได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'character ทั้งหมด +1000 BP',
+  };
+
+  // 1-052 Zombieman — [On Retire] you may place 1 card from your hand into your Remove Area; if you
+  // do, add this card to your hand.
+  reg['UA35BT-OPM-1-052'] = {
+    async onSideline(G, p, unit) {
+      if (!p.hand.length) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้ง 1 ใบไป Remove Area เพื่อเอาการ์ดนี้กลับมือ?`,
+        [{ label: 'ทิ้ง 1 ใบ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      await H.manualDiscardToRemoval(p);
+      const i = p.sideline.lastIndexOf(unit.no);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(unit.no);
+      log(`${unit.card.name}: กลับเข้ามือ`);
+    },
+  };
+
+  // 1-061 Saitama — immune to opponent removal; returns to hand after blocking; draws when milled
+  // from the deck by your own ability (approximated as: any time it lands in the Outside Area).
+  reg['UA35BT-OPM-1-061'] = {
+    ...immuneToRemoval,
+    async onBlock(G, p, unit) { await returnSelfAfterBlocking(p, unit); },
+  };
+
+  // 1-062 Saitama — same, plus [When Attacking] retire an enemy Front Line character.
+  reg['UA35BT-OPM-1-062'] = {
+    ...immuneToRemoval,
+    async onAttack(G, p, unit) { await H.retireEnemyFront(p); },
+    async onBlock(G, p, unit) { await returnSelfAfterBlocking(p, unit); },
+  };
+
+  // 1-067 "Serious Punch" — unusable unless a Saitama is on your field; retire 1 enemy Front Line
+  // and 1 enemy Energy Line character.
+  reg['UA35BT-OPM-1-067'] = {
+    canPlayFromHand(p) { return H.hasCardNamed(p, 'Saitama'); },
+    async onEvent(G, p, card) {
+      const enemy = Engine.opponentOf(p);
+      await H.retireEnemyFront(p);
+      const energy = enemy.energy.filter(u => u.card.type === 'Character');
+      if (!energy.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, energy, 'Serious Punch: เลือก character บน Energy Line ศัตรู', true);
+      const t = energy.find(u => u.uid === uid);
+      if (t) await Engine.sidelineUnit(enemy, t, 'effect');
+    },
+  };
+
+  // 1-069 Speed-o'-Sound Sonic — [Main][1 Per Turn] move 3 cards from your Outside Area to your
+  // Remove Area; if you do, this character gets +1000 BP this turn.
+  reg['UA35BT-OPM-1-069'] = {
+    async onMain(G, p, unit) {
+      if (unit._sonicTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (p.sideline.length < 3) { p.controller.notify?.('ต้องมีการ์ดใน Outside Area 3 ใบ'); return; }
+      unit._sonicTurn = Engine.G.turn;
+      for (let i = 0; i < 3; i++) p.removal.push(p.sideline.shift());
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: ส่ง 3 ใบไป Remove Area, ได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'ส่ง 3 ใบไป Remove Area → +1000 BP',
+  };
+
+  // 1-071 Speed-o'-Sound Sonic — [On Play] you may move 3 cards from your Outside Area to your
+  // Remove Area to draw 1; at the end of this character's attack, if your Outside Area has 3 or
+  // fewer cards and no enemy Front Line character has base BP 6000+, swap with a Sonic on Energy.
+  async function sonicSwap(p, unit) {
+    if (!p.front.includes(unit)) return;
+    if (p.sideline.length > 3) return;
+    const enemy = Engine.opponentOf(p);
+    if (enemy.front.some(u => (u.card.bp || 0) >= 6000)) return;
+    const pool = p.energy.filter(u => /Speed-o'-Sound Sonic/.test(u.card.name || ''));
+    if (!pool.length) return;
+    const uid = await p.controller.chooseOwnCharacter(p, pool, `${unit.card.name}: สลับตำแหน่งกับ Sonic บน Energy Line?`, true);
+    const t = pool.find(u => u.uid === uid);
+    if (!t) return;
+    p.front[p.front.indexOf(unit)] = t;
+    p.energy[p.energy.indexOf(t)] = unit;
+    log(`${unit.card.name}: สลับตำแหน่งกับ ${t.card.name}`);
+  }
+  reg['UA35BT-OPM-1-071'] = {
+    async onPlay(G, p, unit) {
+      if (p.sideline.length < 3) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ส่ง 3 ใบจาก Outside Area ไป Remove Area เพื่อจั่ว 1?`,
+        [{ label: 'ส่ง 3 ใบ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      for (let i = 0; i < 3; i++) p.removal.push(p.sideline.shift());
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+    // an attack ends whether it was won, lost or never blocked
+    async onWinBattle(G, p, unit) { await sonicSwap(p, unit); return false; },
+    async onAnyLoseBattle(G, p, atk, enemy, defender, unit) { if (atk === unit) await sonicSwap(p, unit); },
+    async onAnyUnblockedAttack(G, p, atk, unit) { if (atk === unit) await sonicSwap(p, unit); },
+  };
+
+  // 1-072 Speed-o'-Sound Sonic — [On Play] play 1 red Sonic (need <=2, AP cost 1) from your hand or
+  // Outside Area to your field rested.
+  reg['UA35BT-OPM-1-072'] = {
+    async onPlay(G, p, unit) {
+      const fits = c => c && c.type === 'Character' && (c.color || '').toLowerCase() === 'red' &&
+        /Speed-o'-Sound Sonic/.test(c.name || '') && (c.need || 0) <= 2 && (c.ap || 0) === 1;
+      const hi = p.hand.findIndex(no => fits(byNo(no)));
+      if (hi >= 0) { await Engine.playCardFromZone(p, p.hand[hi], 'hand', { line: 'front', active: false }); return; }
+      const si = p.sideline.findIndex(no => fits(byNo(no)));
+      if (si >= 0) await Engine.playCardFromZone(p, p.sideline[si], 'sideline', { line: 'front', active: false });
+    },
+  };
+
+  // 1-082 Boros — [On Play] +1000 BP this turn; if both players' Life totals 4 or less you may pay
+  // 1 AP to retire an enemy Front Line character.
+  reg['UA35BT-OPM-1-082'] = {
+    async onPlay(G, p, unit) {
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: ได้ +1000 BP เทิร์นนี้`);
+      if (p.life.length + Engine.opponentOf(p).life.length > 4) return;
+      if (Engine.activeAP(p) < 1) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: จ่าย 1 AP เพื่อ retire การ์ดศัตรู?`,
+        [{ label: 'จ่าย 1 AP', value: true }, { label: 'ไม่จ่าย', value: false }]);
+      if (!ok || !Engine.payApForEffect(p, 1)) return;
+      await H.retireEnemyFront(p);
+    },
+  };
+
+  // 1-102 Genos — [On Retire] play 1 yellow Genos (need <=3, AP cost 1) from your hand rested, or
+  // active instead if a Saitama is on your field.
+  reg['UA35ST-OPM-1-102'] = {
+    async onPlay(G, p, unit) { unit.tempImpact = (unit.tempImpact || 0) + 1; log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`); },
+    async onSideline(G, p, unit) {
+      const i = p.hand.findIndex(no => {
+        const c = byNo(no);
+        return c && c.type === 'Character' && (c.color || '').toLowerCase() === 'yellow' &&
+          /Genos/.test(c.name || '') && (c.need || 0) <= 3 && (c.ap || 0) === 1;
+      });
+      if (i < 0) return;
+      const active = H.hasCardNamed(p, 'Saitama');
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active });
+    },
+  };
+
+  // 1-106 Saitama — immune to opponent removal; goes to the bottom of your deck at the end of your
+  // Attack Phase; [On Play] retire an enemy Front Line character with BP 4000 or less.
+  reg['UA35ST-OPM-1-106'] = {
+    ...immuneToRemoval,
+    async onPlay(G, p, unit) { await H.retireEnemyFront(p, 4000); },
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.front.includes(unit) && !p.energy.includes(unit)) return;
+      const line = p.front.includes(unit) ? p.front : p.energy;
+      line.splice(line.indexOf(unit), 1);
+      p.deck.push(unit.no);
+      log(`${unit.card.name}: ลงไปอยู่ใต้สุดของเด็ค`);
+    },
+  };
 })();

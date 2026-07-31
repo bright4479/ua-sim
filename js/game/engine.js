@@ -367,6 +367,16 @@ const Engine = (() => {
     let delta = 0;
     let m = fx.match(/Reduce the required energy of this card in your hand(?: and Outside Area)? by (\d+)/i);
     if (m) delta -= parseInt(m[1]);
+    // same thing, worded with the zone last: "Reduce this card's required energy by 1 while in your hand."
+    m = fx.match(/^(?:\d+\s*)?Reduce this card'?s required energy by (\d+)\s*(?:\[\w+\])?\s*while in your hand/i);
+    if (m) delta -= parseInt(m[1]);
+    // scaling discount: "For every five cards in your outside area, reduce this card's required
+    // energy by 1[green] while in your hand."
+    m = fx.match(/For every (\w+) cards? in your outside area, reduce this card'?s required energy by (\d+)\s*(?:\[\w+\])?\s*while in your hand/i);
+    if (m) {
+      const per = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }[m[1].toLowerCase()] || parseInt(m[1]);
+      if (per > 0) delta -= parseInt(m[2]) * Math.floor(p.sideline.length / per);
+    }
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
     m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
@@ -375,6 +385,14 @@ const Engine = (() => {
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       const hasColor = [...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()));
       if (hasColor) delta -= parseInt(m[3] || m[4] || m[5]);
+    }
+    // same colour-gated discount, worded the other way round: "If there is a green or red card on
+    // your opponent's field, reduce this card's required energy by 1[yellow] while in your hand."
+    m = fx.match(/If there is an? \[?(\w+)\]? (?:or (?:an? )?\[?(\w+)\]? )?[Cc]ard on your opponent'?s (?:area|field), reduce this card'?s required energy by (\d+)\s*(?:\[\w+\])?\s*while in your hand/i);
+    if (m) {
+      const enemy = opponentOf(p);
+      const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
+      if ([...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()))) delta -= parseInt(m[3]);
     }
     // "If there is a <NAME> on/in your Outside Area, reduce the energy requirement of this card
     // in your hand by N." — sideline-gated discount
@@ -438,6 +456,9 @@ const Engine = (() => {
     return /Reduce the required energy of this card in your hand(?: and Outside Area)? by \d+/i.test(fx) ||
       /If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by \d+/i.test(fx) ||
       /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
+      /If there is an? \[?\w+\]? (?:or (?:an? )?\[?\w+\]? )?[Cc]ard on your opponent'?s (?:area|field), reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
+      /^(?:\d+\s*)?Reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
+      /For every \w+ cards? in your outside area, reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If your opponent has \[?\w+\]?(?: or \[?\w+\]?)? (?:card|[Cc]haracters?)[^.]*?reduce this (?:card|character)'?s energy consumption\w*[^.]*?by -?\d+/i.test(fx) ||

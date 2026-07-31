@@ -101,6 +101,7 @@ function residualText(c) {
   t = t.replace(/(?:this character|this field|this card) is played in active\.?/gi, ' ');
   t = t.replace(/Play this (?:field|site|character|card) (?:to your area |on your (?:field|area) )?(?:and )?(?:in active|set (?:it )?to active)\.?/gi, ' ');
   t = t.replace(/(?:This character )?cannot be blocked by characters? with (?:BP ?\d+|\d+ ?BP) or (?:less|lower|more|higher)\.?/gi, ' ');
+  t = t.replace(/This (?:character|card) cannot (?:move|attack or block|attack|block)\.?/gi, ' ');   // kw.cannotMove / cannotAttack / cannotBlock
   // whole sentences the engine already implements (selfGenBonus etc.) — matching only the opening
   // fragment left tails like "the energy it generates by 1" behind and reported false residuals
   t = t.replace(/If this (?:character|card) is active,?\s*(?:increase (?:this (?:character|card)'?s? )?(?:the )?(?:generated energy|energy\s*(?:\[\w+\]\s*)?it generates|card generated energy) by \+?\d+|this character generates (?:addition\w* \+?\d+|\d+ addition\w*)|it gains\s*energy generation)\s*\.?/gi, ' ');

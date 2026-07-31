@@ -384,14 +384,14 @@
 
   // "[When Attacking] Choose up to 1 <criteria> (character) on your area and it gets +N BP..."
   function matchAttackBuff(fx) {
-    const m = fx.match(/^\[When Attacking\]\s*Choose up to 1 (.+?) (?:character |Character )?(?:card )?on your (?:area|field),? and it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i);
+    const m = fx.match(/^\[When Attacking\]\s*Choose up to 1 (.+?) (?:character |Character )?(?:card )?on your (?:area|field),? and it (?:gets|gains) \+?(\d+) ?BP during this turn\.?$/i);
     if (!m) return null;
     return { criteria: m[1], amount: parseInt(m[2]) };
   }
 
   // "[When Attacking] This character gets +N BP (during this turn)." — bare self-buff, no target choice.
   function matchAttackSelfBuff(fx) {
-    const m = fx.match(/^\[When Attacking\]\s*This character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i);
+    const m = fx.match(/^\[When Attacking\]\s*This character (?:gets|gains) \+?(\d+) ?BP(?: during this turn)?\.?$/i);
     return m ? parseInt(m[1]) : null;
   }
   // Grants of the quoted "cannot be blocked by ..." ability. These read as a keyword but are
@@ -961,13 +961,13 @@
         continue;
       }
       // "If there is a character with <NAME> in its name on your area, ... +N BP."
-      if ((m = rest.match(/^If there is a character with <([^>]+)>(?: or <([^>]+)>)? in its name (?:on|in) (?:your area|the same line|your field|your Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there is a character with <([^>]+)>(?: or <([^>]+)>)? in its name (?:on|in) (?:your area|the same line|your field|your Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { name: m[1].trim(), altName: m[2] ? m[2].trim() : null, n: 1, zone: 'field' }, amount: parseInt(m[3]) });
         continue;
       }
       // "If there is a <NAME> on your area/Front Line, this character gets +N BP." (or "If you
       // have <NAME> on your area, ...")
-      if ((m = rest.match(/^If (?:there is an?|you have) <([^>]+)> (?:card )?on your (area|field|Front Line)(?: or [^,]+)?, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If (?:there is an?|you have) <([^>]+)> (?:card )?on your (area|field|Front Line)(?: or [^,]+)?, this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         const name = m[1].trim();
         if (/^Trait:?/i.test(name)) {
           rules.push({ when, cond: { trait: name.replace(/^Trait:?\s*/i, '').toLowerCase(), n: 1, zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
@@ -976,8 +976,17 @@
         }
         continue;
       }
+      // reversed word order: "If <NAME> is on your field, this character gains N BP."
+      if ((m = rest.match(/^If <([^>]+)> is (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
+        const name = m[1].trim();
+        const cond = { n: 1, zone: parseZone(m[2]) };
+        if (/^Trait:?/i.test(name)) cond.trait = name.replace(/^Trait:?\s*/i, '').toLowerCase();
+        else cond.name = name;
+        rules.push({ when, cond, amount: parseInt(m[3]) });
+        continue;
+      }
       // "If there are N or more (other) <Trait:X>/<NAME> cards/characters on/in your area/field/Front Line, ... +N BP"
-      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)>(?: (?:cards?|characters?))?(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+(\d+) ?(?:BP)?\.?$/i))) {
+      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)>(?: (?:cards?|characters?))?(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+?(\d+) ?(?:BP)?\.?$/i))) {
         const raw = m[3].trim();
         const cond = { n: parseInt(m[1]), other: !!m[2], zone: parseZone(m[4]) };
         if (/^Trait:?/i.test(raw)) cond.trait = raw.replace(/^Trait:?\s*/i, '').toLowerCase();
@@ -987,40 +996,45 @@
         continue;
       }
       // "If there are <A> and <B> on your area, this character gets +N BP." — all names at once
-      if ((m = rest.match(/^If there (?:are|is) <([^>]+)> and <([^>]+)>(?: and <([^>]+)>)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there (?:are|is) <([^>]+)> and <([^>]+)>(?: and <([^>]+)>)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { allNames: [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim()), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
         continue;
       }
+      // "If the combined total of your life and your opponent's life is N or less, ... +M BP."
+      if ((m = rest.match(/^If the combined total of your life and your opponent'?s life is (\d+) or less, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { bothLifeMax: parseInt(m[1]) }, amount: parseInt(m[2]) });
+        continue;
+      }
       // "If you have N or more cards in your hand, this character gets +N BP."
-      if ((m = rest.match(/^If (?:you have|there are) (\d+) or more cards in your hand, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If (?:you have|there are) (\d+) or more cards in your hand, this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { hand: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
       // "If there are a total of N or more <NAME> and/or other <Trait:X> cards on your area, this
       // character gets +N BP." (KMY's Hashira-synergy phrasing)
-      if ((m = rest.match(/^If there (?:are|is) a total of (\d+) or more <([^>]+)> (?:and\/or other|and) <Trait:?\s*([^>]+)>(?: (?:cards?|characters?))? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there (?:are|is) a total of (\d+) or more <([^>]+)> (?:and\/or other|and) <Trait:?\s*([^>]+)>(?: (?:cards?|characters?))? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { nameOrTrait: { name: m[2].trim(), trait: m[3].trim().toLowerCase() }, n: parseInt(m[1]), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
         continue;
       }
       // "If you placed a card from your hand (or deck) to the Outside Area during this turn, this character gets +N BP."
-      if ((m = rest.match(/^If you placed (?:a|1) cards? from your (?:hand or deck|hand|deck) to the Outside Area during this turn, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If you placed (?:a|1) cards? from your (?:hand or deck|hand|deck) to the Outside Area during this turn, this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { placedOutside: true }, amount: parseInt(m[1]) });
         continue;
       }
       // "If your opponent's Life is N or less, this character gets/gains +M BP."
-      if ((m = rest.match(/^If your opponent'?s Life is (\d+) or less, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If your opponent'?s Life is (\d+) or less, this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { oppLifeMax: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
       // "If there is a character on your opponent's area/Front Line with BP N or more, this
       // character gets/gains +M BP."
-      if ((m = rest.match(/^If there is a character on your opponent'?s (area|field|Front Line) with BP (\d+) or more, this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there is a character on your opponent'?s (area|field|Front Line) with BP (\d+) or more, this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { oppBpMin: parseInt(m[2]), zone: parseZone(m[1]) }, amount: parseInt(m[3]) });
         continue;
       }
       // "If there are N or more other characters on your area/Front Line, this character gets/gains
       // +M BP." — bare count, no name/trait qualifier (unlike the <NAME>/<Trait:X> rule above).
-      if ((m = rest.match(/^If there are (\d+) or more other characters (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there are (\d+) or more other characters (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { bareOtherCount: parseInt(m[1]), zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
         continue;
       }
@@ -1036,6 +1050,7 @@
         if (r.cond) {
           if (r.cond.tier) { if (!r.cond.tier(owner, unit)) continue; }
           else if (r.cond.allNames) { if (!allNamesPresent(r.cond.allNames, r.cond.zone)(owner, unit)) continue; }
+          else if (r.cond.bothLifeMax != null) { if (owner.life.length + Engine.opponentOf(owner).life.length > r.cond.bothLifeMax) continue; }
           else if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
           else if (r.cond.nameOrTrait) { if (countNameOrTrait(owner, unit, { ...r.cond.nameOrTrait, zone: r.cond.zone }) < r.cond.n) continue; }
@@ -1124,6 +1139,10 @@
       const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
       return owner => owner[zone].length >= need;
     }
+    if ((m = text.match(/^If the combined total of your life and your opponent'?s life is (\d+) or less$/i))) {
+      const n = parseInt(m[1]);
+      return owner => owner.life.length + Engine.opponentOf(owner).life.length <= n;
+    }
     // Life thresholds, on either side
     if ((m = text.match(/^If your Life is (\d+) or less$/i))) {
       const n = parseInt(m[1]);
@@ -1179,7 +1198,9 @@
   //   @• 6 or more: [Impact (1)]
   // Each bullet is desugared into the same rule shape the BP and keyword evaluators already use,
   // so the tiers ride on those evaluators instead of needing a third one. ~45 cards use this shape.
-  const RX_TIER_HEAD = /gains all the following effects based on (?:the )?(?:number of |different types of )?(.*?)[.:]?\s*$/i;
+  // OPM words the head differently ("all abilities listed below if you have the required number of
+  // other <Trait:Hero> cards on your field"), so both openings feed the same base parser
+  const RX_TIER_HEAD = /gains all (?:the following effects based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
   // the bullet marker is frequently missing in the data, and the threshold is written with an
   // optional "BP " prefix and an optional trailing noun ("4 or more cards:")
   const RX_TIER_BULLET = /^[•·・*]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
@@ -1250,7 +1271,7 @@
 
   function parseTierRules(card) {
     const segs = (card.effect || '').split('@').map(s => normalizeFx(s.trim()));
-    const head = segs.findIndex(s => /gains all the following effects based on/i.test(s));
+    const head = segs.findIndex(s => RX_TIER_HEAD.test(s));
     if (head < 0) return { bp: [], kw: [] };
     const count = parseTierBase((segs[head].match(RX_TIER_HEAD) || [])[1]?.trim() || '');
     if (!count) return { bp: [], kw: [] };
@@ -1564,7 +1585,7 @@
       if (ab) { await resolveAbilityGrant(p, unit, ab); return true; }
       return false;
     }
-    if (unit && (m = t.match(/^this character (?:gets|gains) \+(\d+) ?BP(?: during this turn)?\.?$/i))) {
+    if (unit && (m = t.match(/^this character (?:gets|gains) \+?(\d+) ?BP(?: during this turn)?\.?$/i))) {
       unit.bpMod += parseInt(m[1]);
       log(`${unit.card.name}: +${m[1]} BP เทิร์นนี้`);
       return true;
@@ -1594,7 +1615,7 @@
     }
     // "Choose up to 1 other character on your area, it gets +N BP" — also written "Choose another
     // character on your area and it gets/gains +N BP"
-    if ((m = t.match(/^Choose (?:(?:up to )?\d+ (?:other )?characters?|another character) on your area,? (?:and )?it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i))) {
+    if ((m = t.match(/^Choose (?:(?:up to )?\d+ (?:other )?characters?|another character) on your area,? (?:and )?it (?:gets|gains) \+?(\d+) ?BP during this turn\.?$/i))) {
       await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
       return true;
     }
@@ -1760,7 +1781,7 @@
       return;
     }
     // "[On Retire] Choose up to 1 other character on your area, it gets +N BP during this turn."
-    if ((m = fx.match(/^\[On Retire\]\s*Choose (?:up to )?1 other character on your area,?\s*it (?:gets|gains) \+(\d+) ?BP during this turn\.?$/i))) {
+    if ((m = fx.match(/^\[On Retire\]\s*Choose (?:up to )?1 other character on your area,?\s*it (?:gets|gains) \+?(\d+) ?BP during this turn\.?$/i))) {
       await buffOwnCharacter(p, parseInt(m[1]), { excludeUnit: unit });
       return;
     }
