@@ -216,10 +216,10 @@
   // matchers key off a handful of unambiguous fragments so minor wording drift
   // doesn't silently break the whole pattern.
   const RX = {
-    onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?\.?$/i,
+    onplayDraw: /^\[On Play\]\s*Draw (\d+)(?: cards?)?(?: from your deck)?\.?$/i,
     // "of you" (missing the "r") is a recurring typo in the source data — 7 cards across HTR use it.
     apActive: /^Choose up to (\d+) (?:of your? )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
-    onplayBuffOther: /^\[On Play\]\s*(?:Choose up to 1|1 of your)\s+(other )?[Cc]haracters?(?: on your (?:area|field))?[.,]?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
+    onplayBuffOther: /^\[On Play\]\s*(?:Choose (?:up to )?1|1 of your)\s+(other )?[Cc]haracters?(?: with <[^>]+>)?(?: on your (?:area|field))?[.,]?\s*(?:and )?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line[.,]?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
     onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
@@ -584,6 +584,10 @@
     // front line and retire/sideline/Outside-Area it. If <NAME> is on your area, 5000 or less BP instead."
     m = fx.match(/Choose (?:up to )?1 character with (\d+) or less BP on your opponent'?s Front Line and (?:retire it|sideline it|Outside Area it)\.?(?:\s*If <([^>]+)> is on your area, (\d+) or less BP instead\.?)?/i);
     if (m) return { baseBP: parseInt(m[1]), name: m[2] || null, upgradedBP: m[3] ? parseInt(m[3]) : null };
+    // CGH word order: "Choose 1 of your opponent's character in the Frontline with BP5000 or lower
+    // and retire it." — "Frontline" as one word, "lower" for "less", BP glued to the number
+    m = fx.match(/Choose (?:up to )?1 (?:of your opponent'?s|character on your opponent'?s) (?:character )?(?:in|on) the Front ?[Ll]ine with BP ?(\d+) or (?:less|lower) and retire it\.?/i);
+    if (m) return { baseBP: parseInt(m[1]), name: null, upgradedBP: null };
     return null;
   }
   // bare (no "[On Play]" prefix) debuff/rest text, common on Event cards.
@@ -1200,7 +1204,7 @@
   // so the tiers ride on those evaluators instead of needing a third one. ~45 cards use this shape.
   // OPM words the head differently ("all abilities listed below if you have the required number of
   // other <Trait:Hero> cards on your field"), so both openings feed the same base parser
-  const RX_TIER_HEAD = /gains all (?:the following effects based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
+  const RX_TIER_HEAD = /gains (?:all )?(?:(?:the following )?effects? based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
   // the bullet marker is frequently missing in the data, and the threshold is written with an
   // optional "BP " prefix and an optional trailing noun ("4 or more cards:")
   const RX_TIER_BULLET = /^[•·・*]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
@@ -1217,12 +1221,12 @@
     const zoneOf = z => ({ 'outside area': 'sideline', 'remove area': 'removal', 'life area': 'life' })[z.toLowerCase()];
     const distinct = distinctTrail;
 
-    if ((m = text.match(/^(?:Event )?[Cc]ards? (?:on|in) your (Outside Area|Remove Area|Life Area)$/i))) {
+    if ((m = text.match(/^(?:Event )?[Cc]ards? (?:on|in) (?:your|the) (Outside Area|Remove Area|Life Area)$/i))) {
       const zone = zoneOf(m[1]), onlyEvents = /^Event/i.test(text);
       return owner => owner[zone].filter(no => !onlyEvents || UAData.byNo.get(no)?.type === 'Event').length;
     }
     // named / trait cards counted in a hidden zone
-    if (/(?:on|in) your (Outside Area|Remove Area|Life Area)$/i.test(text)) {
+    if (/(?:on|in) (?:your|the) (Outside Area|Remove Area|Life Area)$/i.test(text)) {
       const zone = zoneOf(text.match(/(Outside Area|Remove Area|Life Area)$/i)[1]);
       const ns = names(), ts = traits();
       if (!ns.length && !ts.length) return null;

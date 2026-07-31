@@ -100,7 +100,9 @@ function residualText(c) {
   t = t.replace(/If there are \d+ or more\s*<?[^>,]*>?\s*cards? on your area,\s*(?=this (?:character|field) is played in active)/gi, ' ');
   t = t.replace(/(?:this character|this field|this card) is played in active\.?/gi, ' ');
   t = t.replace(/Play this (?:field|site|character|card) (?:to your area |on your (?:field|area) )?(?:and )?(?:in active|set (?:it )?to active)\.?/gi, ' ');
-  t = t.replace(/(?:This character )?cannot be blocked by characters? with (?:BP ?\d+|\d+ ?BP) or (?:less|lower|more|higher)\.?/gi, ' ');
+  // kw.unblockableBP / unblockableBPMin — the data words this many ways ("This card cannot blocked
+  // by BP2000 or lower characters." drops the "be" and puts the noun last)
+  t = t.replace(/(?:This (?:character|card) )?cannot (?:be )?blocked by (?:characters? with (?:BP ?\d+|\d+ ?BP)|(?:BP ?\d+|\d+ ?BP)) or (?:less|lower|more|higher)(?: characters?)?\.?/gi, ' ');
   t = t.replace(/This (?:character|card) cannot (?:move|attack or block|attack|block)\.?/gi, ' ');   // kw.cannotMove / cannotAttack / cannotBlock
   // whole sentences the engine already implements (selfGenBonus etc.) — matching only the opening
   // fragment left tails like "the energy it generates by 1" behind and reported false residuals

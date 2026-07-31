@@ -394,6 +394,14 @@ const Engine = (() => {
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
       if ([...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()))) delta -= parseInt(m[3]);
     }
+    // CGH puts the zone last: "If your opponent has a [purple] or [red] card, reduce this card's
+    // required energy by 1 in your hand."
+    m = fx.match(/If your opponent has a? ?\[?(\w+)\]? ?(?:or \[?(\w+)\]? )?[Cc]ard(?: on their field)?, ?(?:You can )?reduce this card'?s (?:energy consumption|required energy) by (\d+) ?(?:\[\w+\])? ?in your hand/i);
+    if (m) {
+      const enemy = opponentOf(p);
+      const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
+      if ([...enemy.front, ...enemy.energy].some(u => colors.includes((u.card.color || '').toLowerCase()))) delta -= parseInt(m[3]);
+    }
     // "If there is a <NAME> on/in your Outside Area, reduce the energy requirement of this card
     // in your hand by N." — sideline-gated discount
     m = fx.match(/If there is an? <([^>]+)> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by (\d+)/i);
@@ -458,6 +466,7 @@ const Engine = (() => {
       /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)? [Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
       /If there is an? \[?\w+\]? (?:or (?:an? )?\[?\w+\]? )?[Cc]ard on your opponent'?s (?:area|field), reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /^(?:\d+\s*)?Reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
+      /If your opponent has a? ?\[?\w+\]? ?(?:or \[?\w+\]? )?[Cc]ard(?: on their field)?, ?(?:You can )?reduce this card'?s (?:energy consumption|required energy) by \d+ ?(?:\[\w+\])? ?in your hand/i.test(fx) ||
       /For every \w+ cards? in your outside area, reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /If there is an? <[^>]+> (?:on|in) your Outside Area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
       /If there is an? <[^>]+> on your area, reduce the (?:energy requirement|required energy) of this card in your hand by \d+/i.test(fx) ||
@@ -953,7 +962,7 @@ const Engine = (() => {
           const impactBonusHook = Effects.registry[atk.no]?.impactBonus?.(p, atk)
             ?? Effects.genericImpactBonus?.(p, atk) ?? 0;
           const impact = atk.kw.impact + (atk.tempImpact || 0) + impactBonusHook;
-          if (impact > 0 && !defender.kw.nullifyImpact && !Effects.genericKeywordActive?.(enemy, defender, 'nullifyImpact')) {
+          if (impact > 0 && !defender.kw.nullifyImpact && !defender.tempNullifyImpact && !Effects.genericKeywordActive?.(enemy, defender, 'nullifyImpact')) {
             log(`[Impact ${impact}]!`);
             await dealDamage(p, enemy, impact, atk);
             if (G.over) return;

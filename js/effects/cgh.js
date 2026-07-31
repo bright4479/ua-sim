@@ -680,4 +680,283 @@
   //    (needs a broader own-side watcher, not just this card's own instance)
   // Both keep their base stats/keywords correct; only the bonus text above is unscripted.
   // ────────────────────────────────────────────────────────────────────────
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const traited = (p, t) => [...p.front, ...p.energy].filter(u => (u.card.traits || '').toLowerCase().includes(t.toLowerCase()));
+  const buffAll = (units, n, why) => { for (const u of units) u.bpMod += n; if (units.length) log(why); };
+
+  // 1-022 Gawain — [On Play] every enemy Front Line character gets -1000 BP this turn.
+  reg['CGH-1-022'] = {
+    onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      buffAll(enemy.front, -1000, `${unit.card.name}: character ศัตรูบน Front Line ทั้งหมด -1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 1-024 Gekka (Tohdoh Unit) — [Main][When in Frontline][1 Per Turn] all your Holy Four Sword
+  // characters get +500 BP; [When Attacking] set one of them active.
+  reg['CGH-1-024'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._buffTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._buffTurn = Engine.G.turn;
+      buffAll(traited(p, 'Holy Four Sword'), 500, `${unit.card.name}: Holy Four Sword ทั้งหมด +500 BP เทิร์นนี้`);
+    },
+    mainLabel: 'Holy Four Sword ทั้งหมด +500 BP',
+    async onAttack(G, p, unit) {
+      const targets = traited(p, 'Holy Four Sword').filter(u => u.rested);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Holy Four Sword ตั้งขึ้น`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.rested = false;
+      log(`${t.card.name}: ตั้งขึ้น`);
+    },
+  };
+
+  // 1-036 Kururugi Suzaku — when a Euphemia Li Britannia leaves the field you may move this
+  // character to the Front Line.
+  reg['CGH-1-036'] = {
+    async onAnyLeaveField(G, p, left, unit) {
+      if (!/Euphemia Li Britannia/.test(left.card.name || '')) return;
+      if (!p.energy.includes(unit) || p.front.length >= 4) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ย้ายไป Front Line?`,
+        [{ label: 'ย้าย', value: true }, { label: 'ข้าม', value: false }]);
+      if (ok) await Engine.moveUnitFree(p, unit, 'front');
+    },
+  };
+
+  // 1-055 Cornelia's Gloucester — [On Play] look at the top 5, play 1 green character (need <=2,
+  // AP cost 1) rested, and put the rest on the bottom of the deck.
+  reg['CGH-1-055'] = {
+    async onPlay(G, p, unit) {
+      const revealed = p.deck.splice(0, 5);
+      if (!revealed.length) return;
+      const fits = no => { const c = byNo(no); return c && c.type === 'Character' && (c.color || '').toLowerCase() === 'green' && (c.need || 0) <= 2 && (c.ap || 0) === 1; };
+      // chooseRevealPick returns INDICES into the list it was given, up to maxPick
+      const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: เลือกลงสนามแบบนอน`, c => fits(c.no), 1);
+      const chosen = picked?.length ? revealed[picked[0]] : null;
+      if (chosen) {
+        revealed.splice(revealed.indexOf(chosen), 1);
+        p.deck.unshift(chosen);                       // playCardFromZone looks the card up in the deck
+        await Engine.playCardFromZone(p, chosen, 'deck', { line: 'front', active: false });
+      }
+      for (const no of revealed) p.deck.push(no);
+      log(`${unit.card.name}: ส่งการ์ดที่เหลือลงใต้เด็ค`);
+    },
+  };
+
+  // 1-058 Siegfried — [On Play] add 1 card other than <Siegfried> from your Outside Area to hand.
+  reg['CGH-1-058'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => !/Siegfried/.test(c.name || ''), `${unit.card.name}: เลือกการ์ด (ไม่ใช่ Siegfried) เข้ามือ`);
+    },
+  };
+
+  // 1-059 Lancelot — [On Play] +1000 BP until the start of your next turn; [On Retire] add the
+  // character card underneath this one (its raid source) to your hand.
+  reg['CGH-1-059'] = {
+    onPlay(G, p, unit) { unit.bpPersist += 1000; log(`${unit.card.name}: ได้ +1000 BP จนถึงต้นเทิร์นหน้า`); },
+    // the raid stack is emptied into the Outside Area before onSideline runs, so capture it first
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving === unit) unit._raidSource = unit.under.slice();
+      return false;
+    },
+    onSideline(G, p, unit) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      const no = src.find(n => byNo(n)?.type === 'Character');
+      if (!no) return;
+      const i = p.sideline.lastIndexOf(no);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(no);
+      log(`${unit.card.name}: ${byNo(no)?.name} กลับเข้ามือ`);
+    },
+  };
+
+  // 1-064 "All Hail Britannia" — all your Holy Britannian Empire characters +1000 BP; give a Front
+  // Line character [Impact (1)]; draw 1 if you have a Charles Zi Britannia.
+  reg['CGH-1-064'] = {
+    async onEvent(G, p, card) {
+      buffAll(traited(p, 'Holy Britannian Empire'), 1000, 'All Hail Britannia: Holy Britannian Empire ทั้งหมด +1000 BP เทิร์นนี้');
+      if (p.front.length) {
+        const uid = await p.controller.chooseOwnCharacter(p, p.front, 'All Hail Britannia: เลือก character รับ [Impact (1)]', true);
+        const t = p.front.find(u => u.uid === uid);
+        if (t) { t.tempImpact = (t.tempImpact || 0) + 1; log(`${t.card.name}: ได้ [Impact (1)] เทิร์นนี้`); }
+      }
+      if (!H.hasCardNamed(p, 'Charles Zi Britannia')) return;
+      Engine.draw(p, 1);
+      log('All Hail Britannia: จั่ว 1 ใบ');
+    },
+  };
+
+  // 1-074 Kururugi Suzaku — [When Attacking][1 Per Turn] set another of your characters with BP
+  // 3000 or less to active.
+  reg['CGH-1-074'] = {
+    async onAttack(G, p, unit) {
+      if (unit._activeTurn === Engine.G.turn) return;
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && u.rested && Engine.bp(u) <= 3000);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character (BP ≤3000) ตั้งขึ้น`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      unit._activeTurn = Engine.G.turn;
+      t.rested = false;
+      log(`${t.card.name}: ตั้งขึ้น`);
+    },
+  };
+
+  // 1-081 Shirley Fenette — [Main][Rest this card] draw 1 then discard 1; [On Play] add 1 red Event
+  // card from your Outside Area to your hand.
+  reg['CGH-1-081'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => c.type === 'Event' && (c.color || '').toLowerCase() === 'red',
+        `${unit.card.name}: เลือก Event สีแดงเข้ามือ`);
+    },
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      unit.rested = true;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+    mainLabel: 'จั่ว 1 ทิ้ง 1',
+  };
+
+  // 1-092 Lelouch Lamperouge — [On Play] retire an enemy character with BP 2000 or less, or BP 4000
+  // or less if you have 4+ Event cards in your Outside Area.
+  reg['CGH-1-092'] = {
+    async onPlay(G, p, unit) {
+      const events = p.sideline.filter(no => byNo(no)?.type === 'Event').length;
+      await H.retireEnemyFront(p, events >= 4 ? 4000 : 2000);
+    },
+  };
+
+  // 1-107 Guren MK-II — [On Play] retire an enemy Front Line character with BP 3000 or less, then
+  // this character gains [Impact (1)] during this turn.
+  reg['CGH-1-107'] = {
+    async onPlay(G, p, unit) {
+      await H.retireEnemyFront(p, 3000);
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 2-004 C.C. — [On Retire] give a character on your area [Impact Negate] during this turn.
+  reg['CGH-2-004'] = {
+    async onSideline(G, p, unit) {
+      const targets = [...p.front, ...p.energy];
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก character รับ [Impact Negate]`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.tempNullifyImpact = true;
+      Engine.scheduleDelayedAction(Engine.G.turn + 1, () => { t.tempNullifyImpact = false; });
+      log(`${t.card.name}: ได้ [Impact Negate] เทิร์นนี้`);
+    },
+  };
+
+  // 2-025 Akatsuki Command Model Zikisan — [When Attacking] every enemy Front Line character with
+  // BP 1000 or more gets -500 BP during this turn.
+  reg['CGH-2-025'] = {
+    onAttack(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => Engine.bp(u) >= 1000);
+      buffAll(targets, -500, `${unit.card.name}: character ศัตรู (BP ≥1000) ทั้งหมด -500 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-026 Vincent (Rolo Machine) — [On Play] rest an enemy Front Line character and keep it down
+  // through its next Stand; [Main][When in Frontline][Rest this card] rest an enemy character.
+  reg['CGH-2-026'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => !u.rested);
+      if (!targets.length) return;
+      const uid = await p.controller.chooseEnemyCharacter(p, targets, `${unit.card.name}: เลือก character ศัตรูวางนอน`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.rested = true;
+      t.skipNextStand = true;
+      log(`${t.card.name}: วางนอน และจะไม่ตั้งขึ้นในรอบถัดไป`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.front.filter(u => !u.rested);
+      if (!targets.length) { p.controller.notify?.('ไม่มีเป้าหมาย'); return; }
+      unit.rested = true;
+      await H.restEnemyFront(p);
+    },
+    mainLabel: 'วางนอน character ศัตรู',
+  };
+
+  // 2-047 Zangetsu — [On Play] give a Four Holy Swords character +2000 BP during this turn.
+  reg['CGH-2-047'] = {
+    async onPlay(G, p, unit) {
+      const targets = traited(p, 'Four Holy Sword');
+      if (!targets.length) return;
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Four Holy Swords รับ +2000 BP`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      t.bpMod += 2000;
+      log(`${t.card.name}: ได้ +2000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-048 Akatsuki Command Model Zikisan — [On Play] add 1 Four Holy Swords / Kyoshiro Tohdoh
+  // character with required energy 2 or less from your Outside Area to your hand.
+  reg['CGH-2-048'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => c.type === 'Character' && (c.need || 0) <= 2 &&
+        ((c.traits || '').includes('Four Holy Sword') || /Kyoshiro Tohdoh/.test(c.name || '')),
+        `${unit.card.name}: เลือกการ์ดเข้ามือ`);
+    },
+  };
+
+  // 2-060 Lancelot Conquista — [Main][When in Frontline][1 Per Turn] give another Knights of the
+  // Round card +1000 BP during this turn.
+  reg['CGH-2-060'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._knightTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const targets = traited(p, 'Knights Of The Round').filter(u => u !== unit);
+      if (!targets.length) { p.controller.notify?.('ไม่มีเป้าหมาย'); return; }
+      const uid = await p.controller.chooseOwnCharacter(p, targets, `${unit.card.name}: เลือก Knights of the Round รับ +1000 BP`, true);
+      const t = targets.find(u => u.uid === uid);
+      if (!t) return;
+      unit._knightTurn = Engine.G.turn;
+      t.bpMod += 1000;
+      log(`${t.card.name}: ได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'Knights of the Round อื่น +1000 BP',
+  };
+
+  // 2-066 C.C. — [On Play] you may place 2 cards from your hand to the Outside Area to draw 3;
+  // [On Retire] with 3+ Pizza cards (other than C.C.) in your Outside Area, fetch a character with
+  // required energy 3 or less from there.
+  reg['CGH-2-066'] = {
+    async onPlay(G, p, unit) {
+      if (p.hand.length < 2) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้ง 2 ใบเพื่อจั่ว 3?`,
+        [{ label: 'ทิ้ง 2 ใบ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      await H.discardFromHand(p);
+      await H.discardFromHand(p);
+      Engine.draw(p, 3);
+      log(`${unit.card.name}: จั่ว 3 ใบ`);
+    },
+    async onSideline(G, p, unit) {
+      const pizza = p.sideline.filter(no => {
+        const c = byNo(no);
+        return c && (c.traits || '').includes('Pizza') && !/C\.C\./.test(c.name || '');
+      }).length;
+      if (pizza < 3) return;
+      await H.fetchFromSideline(p, c => c.type === 'Character' && (c.need || 0) <= 3,
+        `${unit.card.name}: เลือก character (energy ≤3) เข้ามือ`);
+    },
+  };
 })();
