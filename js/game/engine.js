@@ -143,7 +143,8 @@ const Engine = (() => {
     // Raid, and a trait reference instead of the literal words "Character Cards").
     if (/(?:Character Cards|<[^>]+>\s*cards) with \[?Raid\]? can (?:use|raid) this (?:card|character)(?: to raid)?/i.test(fx)) kw.raidableByAny = true;
     // "If this card is retired, it will be placed to the Remove Area instead." (permanent)
-    if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx)) kw.retireToRemoval = true;
+    if (/If this card is retired, it will be placed to the Remove Area instead/i.test(fx) ||
+        /\[On Retire\]\s*Place this card to the Remove Area/i.test(fx)) kw.retireToRemoval = true;
     // "This character is not affected by BP reducing effects." (permanent)
     if (/not affected by BP[- ]?reduc\w*/i.test(fxStatic)) kw.immuneBpReduction = true;
     // "This character [Snipe] cannot target characters with BP2000 or more." — caps which units

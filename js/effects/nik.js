@@ -842,4 +842,231 @@
       Engine.log(`${self.card.name}: ตั้งขึ้น Active, +1000 BP เทิร์นนี้`);
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const hasTrait = (u, t) => (u.card.traits || '').toLowerCase().includes(t.toLowerCase());
+  const ownWithTrait = (p, t) => [...p.front, ...p.energy].filter(u => hasTrait(u, t));
+
+  async function pickOwn(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemy(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  // look at the top N, take one matching card into hand, then return the rest to top or bottom
+  async function lookTopTake(p, unit, n, fits, title, rest) {
+    const revealed = p.deck.splice(0, n);
+    if (!revealed.length) return null;
+    const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: ${title}`, c => !fits || fits(c), 1);
+    const chosen = picked?.length ? revealed[picked[0]] : null;
+    if (chosen) {
+      revealed.splice(revealed.indexOf(chosen), 1);
+      p.hand.push(chosen);
+      log(`${unit.card.name}: เพิ่ม ${byNo(chosen)?.name} เข้ามือ`);
+    }
+    for (const no of revealed) {
+      if (rest === 'top') p.deck.unshift(no);
+      else if (rest === 'removal') p.removal.push(no);
+      else p.deck.push(no);
+    }
+    return chosen;
+  }
+
+  // 1-011 Rapi — [On Play] with an Event used this turn, move a Counters character to the other
+  // line; [When Attacking] send 4 Event Cards from your Outside Area to the Remove Area to set
+  // another Counters character active.
+  reg['NIK-1-011'] = {
+    async onPlay(G, p, unit) {
+      if (!p._eventsUsedThisTurn) return;
+      const t = await pickOwn(p, ownWithTrait(p, 'Counters'), `${unit.card.name}: เลือก Counters ย้ายไปอีกแถว`);
+      if (t) await Engine.moveUnitFree(p, t, p.front.includes(t) ? 'energy' : 'front');
+    },
+    async onAttack(G, p, unit) {
+      const events = p.sideline.map((no, i) => [no, i]).filter(([no]) => byNo(no)?.type === 'Event').map(([, i]) => i);
+      if (events.length < 4) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ส่ง Event 4 ใบไป Remove Area เพื่อตั้ง Counters?`,
+        [{ label: 'ส่ง 4 ใบ', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      for (const i of events.slice(0, 4).sort((a, b) => b - a)) p.removal.push(p.sideline.splice(i, 1)[0]);
+      log(`${unit.card.name}: ส่ง Event 4 ใบไป Remove Area`);
+      const t = await pickOwn(p, ownWithTrait(p, 'Counters').filter(u => u !== unit && u.rested), `${unit.card.name}: เลือก Counters ตั้งขึ้น`);
+      if (t) { t.rested = false; log(`${t.card.name}: ตั้งขึ้น`); }
+    },
+  };
+
+  // 1-024 Mihara — [Main][1 Per Turn] usable only once one of your own Front Line characters was
+  // rested by your own card effect this turn; rest an enemy Front Line character.
+  reg['NIK-1-024'] = {
+    async onMain(G, p, unit) {
+      if (unit._miharaTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!frontRestedByEffectThisTurn(p)) { p.controller.notify?.('ต้องมี character ที่ถูกวางนอนด้วยเอฟเฟกต์ก่อน'); return; }
+      unit._miharaTurn = Engine.G.turn;
+      await H.restEnemyFront(p);
+    },
+    mainLabel: 'วางนอน character ศัตรู',
+  };
+
+  // 1-027 Yuni — [On Play] you may rest one of your own active Front Line characters to draw 1 and
+  // give every enemy Front Line character with BP 1000+ -500 BP; [Main][When in Frontline]
+  // [1 Per Turn] swap a Front Line and an Energy Line character.
+  reg['NIK-1-027'] = {
+    async onPlay(G, p, unit) {
+      const t = await restOwnFrontActive(p, { excludeUnit: unit });
+      if (!t) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      const enemy = Engine.opponentOf(p);
+      let n = 0;
+      for (const u of enemy.front) if (Engine.bp(u) >= 1000) { u.bpMod -= 500; n++; }
+      if (n) log(`${unit.card.name}: character ศัตรู ${n} ใบ -500 BP เทิร์นนี้`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._swapTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.front.length || !p.energy.length) { p.controller.notify?.('ต้องมี character ทั้งสองแถว'); return; }
+      const f = await pickOwn(p, p.front, `${unit.card.name}: เลือกตัวบน Front Line`);
+      if (!f) return;
+      const en = await pickOwn(p, p.energy, `${unit.card.name}: เลือกตัวบน Energy Line`);
+      if (!en) return;
+      unit._swapTurn = Engine.G.turn;
+      p.front[p.front.indexOf(f)] = en;
+      p.energy[p.energy.indexOf(en)] = f;
+      log(`${unit.card.name}: สลับตำแหน่ง ${f.card.name} ↔ ${en.card.name}`);
+    },
+    mainLabel: 'สลับตำแหน่ง Front ↔ Energy',
+  };
+
+  // 1-049 Harran — [When Attacking] look at the top 2 and add a card without a Trigger to your
+  // hand; the rest go back on top.
+  reg['NIK-1-049'] = {
+    async onAttack(G, p, unit) {
+      await lookTopTake(p, unit, 2, c => !c.trigger, 'เลือกการ์ดที่ไม่มี Trigger เข้ามือ', 'top');
+    },
+  };
+
+  // 1-058 Rapunzel — [On Play] add a character other than Rapunzel from your Outside Area to your
+  // hand; [When Attacking] with an empty hand, rest an enemy Front Line character with BP 2000 or less.
+  reg['NIK-1-058'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => c.type === 'Character' && !/Rapunzel/.test(c.name || ''),
+        `${unit.card.name}: เลือก character (ไม่ใช่ Rapunzel) เข้ามือ`);
+    },
+    async onAttack(G, p, unit) {
+      if (p.hand.length) return;
+      await H.restEnemyFront(p, 2000);
+    },
+  };
+
+  // 1-061 Modernia — [On Play] you may give an enemy Front Line character -3000 BP this turn, at
+  // the cost of placing your whole hand into the Outside Area.
+  reg['NIK-1-061'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      if (!enemy.front.length) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้งมือทั้งหมดเพื่อลด BP ศัตรู 3000?`,
+        [{ label: 'ทิ้งมือทั้งหมด', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      const t = await pickEnemy(p, enemy.front, `${unit.card.name}: เลือก character ศัตรู รับ -3000 BP`);
+      if (!t) return;
+      t.bpMod -= 3000;
+      const n = p.hand.length;
+      while (p.hand.length) p.sideline.push(p.hand.pop());
+      log(`${t.card.name}: -3000 BP เทิร์นนี้ (ทิ้งมือ ${n} ใบ)`);
+    },
+  };
+
+  // 1-092 Laplace — [On Play] move an enemy Front Line character to their Energy Line.
+  reg['NIK-1-092'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      if (enemy.energy.length >= 4) return;
+      const t = await pickEnemy(p, enemy.front, `${unit.card.name}: เลือก character ศัตรู ย้ายไป Energy Line`);
+      if (t) await Engine.moveUnitFree(enemy, t, 'energy');
+    },
+  };
+
+  // 1-103 Neon — [When Attacking] with an Event used this turn, you may draw 1 then discard 1.
+  reg['NIK-1-103'] = {
+    async onAttack(G, p, unit) {
+      if (!p._eventsUsedThisTurn) return;
+      const ok = await p.controller.chooseOption(p, `${unit.card.name}: จั่ว 1 แล้วทิ้ง 1?`,
+        [{ label: 'จั่ว 1 ทิ้ง 1', value: true }, { label: 'ข้าม', value: false }]);
+      if (!ok) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 1-104 Marian — [On Retire] look at the top 5 and add a <Memory> or a Counters card with
+  // required energy 3 or less to your hand; discard 1 if the card taken was a character.
+  reg['NIK-1-104'] = {
+    async onSideline(G, p, unit) {
+      const took = await lookTopTake(p, unit, 5,
+        c => /Memory/.test(c.name || '') || (hasTrait({ card: c }, 'Counters') && (c.need || 0) <= 3),
+        'เลือกการ์ดเข้ามือ', 'bottom');
+      if (took && byNo(took)?.type === 'Character') await H.discardFromHand(p);
+    },
+  };
+
+  // 2-006 Viper — [Main][When in Frontline][1 Per Turn] rest another active Exotic/Wardress card to
+  // buff one of them, draw 2 and discard 1.
+  reg['PC02BT-NIK-2-006'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._viperTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const fits = u => hasTrait(u, 'Exotic') || hasTrait(u, 'Wardress');
+      const cost = p.front.filter(u => u !== unit && !u.rested && fits(u));
+      if (!cost.length) { p.controller.notify?.('ต้องมี Exotic/Wardress ที่ตั้งอยู่บน Front Line'); return; }
+      const c = await pickOwn(p, cost, `${unit.card.name}: เลือก Exotic/Wardress วางนอน`);
+      if (!c) return;
+      unit._viperTurn = Engine.G.turn;
+      c.rested = true;
+      c._restedByEffectTurn = Engine.G.turn;
+      log(`${c.card.name}: ถูกวางนอน (โดยเอฟเฟกต์)`);
+      const t = await pickOwn(p, [...p.front, ...p.energy].filter(fits), `${unit.card.name}: เลือก Exotic/Wardress รับ +2000 BP และ [Impact 1]`);
+      if (t) {
+        t.bpMod += 2000;
+        t.tempImpact = (t.tempImpact || 0) + 1;
+        log(`${t.card.name}: ได้ +2000 BP และ [Impact (1)] เทิร์นนี้`);
+      }
+      Engine.draw(p, 2);
+      log(`${unit.card.name}: จั่ว 2 ใบ`);
+      await H.discardFromHand(p);
+    },
+    mainLabel: 'วางนอน Exotic/Wardress → บัฟ + จั่ว 2',
+  };
+
+  // 2-014 Cinderella — [On Play] set an Old Tales card active; [On Retire] look at the top 3, keep
+  // 1 and send the rest to the Remove Area.
+  reg['PC02BT-NIK-2-014'] = {
+    async onPlay(G, p, unit) {
+      const t = await pickOwn(p, ownWithTrait(p, 'Old Tales').filter(u => u.rested), `${unit.card.name}: เลือก Old Tales ตั้งขึ้น`);
+      if (t) { t.rested = false; log(`${t.card.name}: ตั้งขึ้น`); }
+    },
+    async onSideline(G, p, unit) {
+      await lookTopTake(p, unit, 3, null, 'เลือกการ์ดเข้ามือ (ที่เหลือไป Remove Area)', 'removal');
+    },
+  };
+
+  // 2-017 Little Mermaid — [When Attacking] send the top card to the top of your deck or the Remove
+  // Area, then draw 1 if your Remove Area holds 6 or more cards.
+  reg['PC02BT-NIK-2-017'] = {
+    async onAttack(G, p, unit) {
+      if (p.deck.length) {
+        const no = p.deck[0], c = byNo(no);
+        const keep = await p.controller.chooseOption(p, `${unit.card.name}: ${c?.name} — เก็บไว้บนเด็คหรือส่งไป Remove Area?`,
+          [{ label: 'เก็บบนเด็ค', value: true }, { label: 'ส่งไป Remove Area', value: false }]);
+        if (!keep) { p.removal.push(p.deck.shift()); log(`${unit.card.name}: ส่ง ${c?.name} ไป Remove Area`); }
+      }
+      if (p.removal.length < 6) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: Remove Area ≥6 ใบ → จั่ว 1 ใบ`);
+    },
+  };
 })();

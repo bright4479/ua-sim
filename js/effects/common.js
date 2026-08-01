@@ -1004,6 +1004,36 @@
         rules.push({ when, cond: { allNames: [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim()), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
         continue;
       }
+      // "If there is a face-down card under this character, this character gets +N BP."
+      if ((m = rest.match(/^If there is a face-down card under this character, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { faceDown: 1 }, amount: parseInt(m[1]) });
+        continue;
+      }
+      // "If you used an Event Card during this turn, this character gets +N BP."
+      if ((m = rest.match(/^If you used an Event Card during this turn, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { usedEvent: true }, amount: parseInt(m[1]) });
+        continue;
+      }
+      // "If you have N or more cards in your Remove Area, this character gets +M BP."
+      if ((m = rest.match(/^If you have (\d+) or more cards in your (Remove Area|Outside Area), this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { zoneCount: { zone: /remove/i.test(m[2]) ? 'removal' : 'sideline', n: parseInt(m[1]) } }, amount: parseInt(m[3]) });
+        continue;
+      }
+      // "If there is another <Trait:X> character with BP N or more on your Front Line, ... +M BP."
+      if ((m = rest.match(/^If there (?:is|are) (\d+ or more )?(?:an|another|other)? ?<Trait:?\s*([^>]+)> characters? with BP (\d+) or more on your Front Line, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { traitBpMin: { trait: m[2].trim().toLowerCase(), bp: parseInt(m[3]), n: m[1] ? parseInt(m[1]) : 1 } }, amount: parseInt(m[4]) });
+        continue;
+      }
+      // "If there are no cards with <Trigger> on your area, this character gains +N BP ..."
+      if ((m = rest.match(/^If there are no cards with <Trigger> on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { noTriggerOnly: true }, amount: parseInt(m[1]) });
+        continue;
+      }
+      // "If there are N or more cards without <Trigger> on your area, ... +M BP."
+      if ((m = rest.match(/^If there are (\d+) or more cards without <Trigger> on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { noTriggerCount: parseInt(m[1]) }, amount: parseInt(m[2]) });
+        continue;
+      }
       // "If the combined total of your life and your opponent's life is N or less, ... +M BP."
       if ((m = rest.match(/^If the combined total of your life and your opponent'?s life is (\d+) or less, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
         rules.push({ when, cond: { bothLifeMax: parseInt(m[1]) }, amount: parseInt(m[2]) });
@@ -1054,6 +1084,18 @@
         if (r.cond) {
           if (r.cond.tier) { if (!r.cond.tier(owner, unit)) continue; }
           else if (r.cond.allNames) { if (!allNamesPresent(r.cond.allNames, r.cond.zone)(owner, unit)) continue; }
+          else if (r.cond.faceDown != null) { if ((unit.counters || []).length < r.cond.faceDown) continue; }
+          else if (r.cond.usedEvent) { if (!owner._eventsUsedThisTurn) continue; }
+          else if (r.cond.zoneCount) { if (owner[r.cond.zoneCount.zone].length < r.cond.zoneCount.n) continue; }
+          else if (r.cond.traitBpMin) {
+            // reading another unit's BP re-enters this evaluator, and two cards with this rule on
+            // the same line would recurse forever — measure the others from their raw fields
+            const { trait, bp, n } = r.cond.traitBpMin;
+            const rawBp = u => (u.card.bp || 0) + (u.bpMod || 0) + (u.bpPersist || 0);
+            if (owner.front.filter(u => u !== unit && (u.card.traits || '').toLowerCase().includes(trait) && rawBp(u) >= bp).length < n) continue;
+          }
+          else if (r.cond.noTriggerOnly) { if ([...owner.front, ...owner.energy].some(u => u.card.trigger)) continue; }
+          else if (r.cond.noTriggerCount != null) { if (countNoTrigger(owner) < r.cond.noTriggerCount) continue; }
           else if (r.cond.bothLifeMax != null) { if (owner.life.length + Engine.opponentOf(owner).life.length > r.cond.bothLifeMax) continue; }
           else if (r.cond.hand != null) { if (owner.hand.length < r.cond.hand) continue; }
           else if (r.cond.placedOutside) { if (!owner._placedToOutsideThisTurn) continue; }
@@ -1142,6 +1184,14 @@
     if ((m = text.match(/^If there are (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
       const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
       return owner => owner[zone].length >= need;
+    }
+    // NIK counts cards by whether they carry a Trigger
+    if ((m = text.match(/^If there are (\d+) or more cards without <Trigger> on your area$/i))) {
+      const need = parseInt(m[1]);
+      return owner => countNoTrigger(owner) >= need;
+    }
+    if (/^If there are no cards with <Trigger> on your area$/i.test(text)) {
+      return owner => [...owner.front, ...owner.energy].every(u => !u.card.trigger);
     }
     if ((m = text.match(/^If the combined total of your life and your opponent'?s life is (\d+) or less$/i))) {
       const n = parseInt(m[1]);
