@@ -1244,6 +1244,9 @@
       return owner => [...owner.front, ...owner.energy]
         .filter(u => traitMatches(u.card.traits, trait) && !(u.card.name || '').includes(exclude)).length >= need;
     }
+    if (/^If this character moved during this turn$/i.test(text)) {
+      return (owner, unit) => !!unit._movedThisTurn;
+    }
     // NIK counts cards by whether they carry a Trigger
     if ((m = text.match(/^If there(?: are)? (\d+) or more cards without <Trigger> on your area$/i))) {
       const need = parseInt(m[1]);
@@ -1597,6 +1600,12 @@
     // cards re-run one of their own hooks from the Main Phase.
     if ((m = fx.match(/^\[Main\][^.]*?Activate this character'?s \[(On Play|On Retire)\] effect\.?$/i)))
       return { kind: 'reactivate', hook: /play/i.test(m[1]) ? 'play' : 'retire', frontOnly: /\[When in Frontline\]/i.test(fx), oncePerTurn: /\[1 Per Turn\]/i.test(fx) };
+    // "[Main][Discard 1][1 Per Turn] Move this character to another line." — 7 cards
+    if ((m = fx.match(/^\[Main\]([^.]*?)Move this (?:character|card) to another line\.?$/i)))
+      return { kind: 'moveSelf', discardN: (m[1].match(/\[Discard (\d+)\]/i) || [, 0])[1] | 0,
+               payAp: (m[1].match(/\[Pay (\d+) AP\]/i) || [, 0])[1] | 0,
+               restSelf: /\[Rest this card\]/i.test(m[1]),
+               frontOnly: /\[When in Frontline\]/i.test(m[1]), oncePerTurn: /\[1 Per Turn\]/i.test(m[1]) };
     if ((m = fx.match(RX_SELF_GEN_RETIRE))) return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if (fx.match(RX_SELF_GEN_RETIRE2)) return { kind: 'selfGenRetire', n: 1 };
     // HTR-style: "This character generates 1 additional [blue] energy. At the end of the main phase, retire this character."
@@ -1815,6 +1824,18 @@
       unit.tempGen += mm.n;
       unit.retireAtEndOfMain = true;
       log(`${unit.card.name}: +${mm.n} energy generation เทิร์นนี้ (จะ retire เมื่อจบ Main Phase)`);
+    } else if (mm.kind === 'moveSelf') {
+      if (mm.frontOnly && !p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (mm.oncePerTurn && unit._moveSelfTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (mm.restSelf && unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      if (mm.discardN && p.hand.length < mm.discardN) { p.controller.notify?.(`ต้องทิ้ง ${mm.discardN} ใบ`); return; }
+      const dest = p.front.includes(unit) ? 'energy' : 'front';
+      if ((dest === 'front' ? p.front : p.energy).length >= 4) { p.controller.notify?.('อีกแถวเต็มแล้ว'); return; }
+      if (mm.payAp && !Engine.payApForEffect(p, mm.payAp)) return;
+      for (let i = 0; i < mm.discardN; i++) await discardFromHand(p);
+      if (mm.restSelf) unit.rested = true;
+      unit._moveSelfTurn = Engine.G.turn;
+      await Engine.moveUnitFree(p, unit, dest);
     } else if (mm.kind === 'reactivate') {
       if (mm.frontOnly && !p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
       if (mm.oncePerTurn && unit._reactivateTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }

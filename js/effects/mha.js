@@ -776,4 +776,262 @@
       else { unit.bpMod += 1000; log(`${unit.card.name}: +1000 BP เทิร์นนี้`); }
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const isMine = p => Engine.G.players[Engine.G.active] === p;
+  const confirmM = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnM(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyM(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  // distinct <Trait: One For All> names across the board AND the Outside Area — the Midoriya line
+  // scales several effects off this count
+  function ofaDistinct(p) {
+    const names = new Set();
+    for (const u of [...p.front, ...p.energy]) if ((u.card.traits || '').includes('One For All')) names.add(u.card.name);
+    for (const no of p.sideline) { const c = byNo(no); if (c && (c.traits || '').includes('One For All')) names.add(c.name); }
+    return names.size;
+  }
+  // discard N cards whose name does not contain `except`, then free-play a matching card from the
+  // Outside Area — the shape shared by MHA-2-009 and MHA-2-012
+  async function payThenPlayFromOutside(p, unit, { discardN, except, fits }) {
+    const payable = p.hand.filter(no => !except || !(byNo(no)?.name || '').includes(except));
+    if (payable.length < discardN) return false;
+    if (!p.sideline.some(no => fits(byNo(no)))) return false;
+    if (!await confirmM(p, `${unit.card.name}: ทิ้ง ${discardN} ใบเพื่อลง ${except || 'การ์ด'} จาก Outside Area?`)) return false;
+    for (let i = 0; i < discardN; i++) {
+      const idx = p.hand.findIndex(no => !except || !(byNo(no)?.name || '').includes(except));
+      if (idx < 0) break;
+      p.sideline.push(p.hand.splice(idx, 1)[0]);
+    }
+    log(`${unit.card.name}: ทิ้ง ${discardN} ใบไป Outside Area`);
+    const si = p.sideline.findIndex(no => fits(byNo(no)));
+    if (si < 0) return true;
+    await Engine.playCardFromZone(p, p.sideline[si], 'sideline', { line: 'front', active: false });
+    return true;
+  }
+  const yellowMidoriya = c => c && c.type === 'Character' && (c.color || '').toLowerCase() === 'yellow' &&
+    /Midoriya|Izuku/.test(c.name || '') && (c.need || 0) <= 4 && (c.ap || 0) === 1;
+
+  // 1-055 Hado Nejire — [On Play] with 3+ other characters of required energy 4+, retire an enemy
+  // Front Line character with BP 5000 or less.
+  reg['MHA-1-055'] = {
+    async onPlay(G, p, unit) {
+      const n = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.need || 0) >= 4).length;
+      if (n < 3) return;
+      await H.retireEnemyFront(p, 5000);
+    },
+  };
+
+  // 1-072 Endeavor — [On Play] refill to 3 cards; [When Attacking] pitch any number of cards to
+  // retire an enemy with BP up to 1000 per card pitched.
+  reg['MHA-1-072'] = {
+    async onPlay(G, p, unit) {
+      while (p.hand.length > 3) {
+        const ok = await confirmM(p, `${unit.card.name}: ทิ้งการ์ดจากมือไป Outside Area? (เหลือ ${p.hand.length} ใบ)`);
+        if (!ok) break;
+        await H.discardFromHand(p);
+      }
+      while (p.hand.length < 3 && p.deck.length) Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่วจนมือครบ 3 ใบ`);
+    },
+    async onAttack(G, p, unit) {
+      if (!p.hand.length) return;
+      const opts = [];
+      for (let n = Math.min(p.hand.length, 6); n >= 1; n--) opts.push({ label: `ทิ้ง ${n} ใบ (retire BP ≤${n * 1000})`, value: n });
+      opts.push({ label: 'ข้าม', value: 0 });
+      const n = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้งการ์ดกี่ใบ?`, opts);
+      if (!n) return;
+      for (let i = 0; i < n; i++) await H.discardFromHand(p);
+      await H.retireEnemyFront(p, n * 1000);
+    },
+  };
+
+  // 1-085 Bakugo Katsuki — [On Play] bury 2 cards under this one; +1000 BP each; [When Attacking]
+  // spend one of them to retire an enemy with BP 2500 or less.
+  reg['MHA-1-085'] = {
+    bpBonus(p, unit) { return isMine(p) ? 1000 * (unit.counters || []).length : 0; },
+    onPlay(G, p, unit) {
+      for (let i = 0; i < 2 && p.deck.length; i++) unit.counters.push(p.deck.shift());
+      log(`${unit.card.name}: วางการ์ดคว่ำใต้ตัว ${unit.counters.length} ใบ`);
+    },
+    async onAttack(G, p, unit) {
+      if (!unit.counters.length) return;
+      if (!await confirmM(p, `${unit.card.name}: ใช้การ์ดคว่ำ 1 ใบเพื่อ retire ศัตรู (BP ≤2500)?`)) return;
+      p.sideline.push(unit.counters.pop());
+      await H.retireEnemyFront(p, 2500);
+    },
+  };
+
+  // 1-107 Midoriya Izuku — [On Play] draw 1 if the opponent's Front Line holds 3 or more.
+  reg['MHA-1-107'] = {
+    onPlay(G, p, unit) {
+      if (Engine.opponentOf(p).front.length < 3) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 2-009 / 2-012 — pitch cards to free-play a yellow Izuku Midoriya from the Outside Area.
+  reg['MHA-2-009'] = {
+    async onPlay(G, p, unit) {
+      unit.bpMod += 1000;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ +1000 BP และ [Impact (1)] เทิร์นนี้`);
+      await payThenPlayFromOutside(p, unit, { discardN: 1, except: 'Midoriya', fits: yellowMidoriya });
+    },
+  };
+  reg['MHA-2-012'] = {
+    async onPlay(G, p, unit) {
+      // on your turn the cost may be 1 AP instead of pitching two cards
+      if (isMine(p) && Engine.activeAP(p) >= 1 &&
+          await confirmM(p, `${unit.card.name}: จ่าย 1 AP แทนการทิ้ง 2 ใบ?`)) {
+        if (Engine.payApForEffect(p, 1)) {
+          const si = p.sideline.findIndex(no => yellowMidoriya(byNo(no)));
+          if (si >= 0) await Engine.playCardFromZone(p, p.sideline[si], 'sideline', { line: 'front', active: false });
+          return;
+        }
+      }
+      await payThenPlayFromOutside(p, unit, { discardN: 2, except: 'Midoriya', fits: yellowMidoriya });
+    },
+  };
+
+  // 2-022 Midoriya Izuku — unplayable while another Class A card is out; +1000 BP with 3+ distinct
+  // One For All names across your area and Outside Area.
+  const noOtherClassA = (p, card) => ![...p.front, ...p.energy].some(u =>
+    (u.card.traits || '').includes('Class A') && !/Midoriya|Izuku/.test(u.card.name || ''));
+  reg['MHA-2-022'] = {
+    canPlayFromHand(p, card) { return noOtherClassA(p, card); },
+    bpBonus(p, unit) { return ofaDistinct(p) >= 3 ? 1000 : 0; },
+  };
+
+  // 2-026 Midoriya Izuku — same restriction; [On Play] free-play a One For All card to Energy.
+  reg['MHA-2-026'] = {
+    canPlayFromHand(p, card) { return noOtherClassA(p, card); },
+    async onPlay(G, p, unit) {
+      if (p.energy.length >= 4) return;
+      const fits = c => c && (c.traits || '').includes('One For All');
+      const hi = p.hand.findIndex(no => fits(byNo(no)));
+      if (hi >= 0) { await Engine.playCardFromZone(p, p.hand[hi], 'hand', { line: 'energy', active: false }); return; }
+      const si = p.sideline.findIndex(no => fits(byNo(no)));
+      if (si >= 0) await Engine.playCardFromZone(p, p.sideline[si], 'sideline', { line: 'energy', active: false });
+    },
+  };
+
+  // 2-034 "Faux 100 Percent" — retire an enemy with BP 3000 or less, 5000 with an Izuku out.
+  reg['MHA-2-034'] = {
+    async onEvent(G, p, card) {
+      await H.retireEnemyFront(p, H.hasCardNamed(p, 'Midoriya') || H.hasCardNamed(p, 'Izuku') ? 5000 : 3000);
+    },
+  };
+
+  // 2-051 Asui Tsuyu — [Main][Rest this card] buff another character, then bounce this one.
+  reg['MHA-2-051'] = {
+    frontGenBonus(p, unit) { return p.front.includes(unit) && p.front.length > 1 ? 1 : 0; },
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const t = await pickOwnM(p, [...p.front, ...p.energy].filter(u => u !== unit), `${unit.card.name}: เลือก character รับ +1000 BP`);
+      if (!t) return;
+      unit.rested = true;
+      t.bpMod += 1000;
+      log(`${t.card.name}: ได้ +1000 BP เทิร์นนี้`);
+      await Engine.returnUnitToHand(p, unit);
+    },
+    mainLabel: 'บัฟ +1000 BP แล้วกลับเข้ามือ',
+  };
+
+  // 2-054 All Might — [On Play] +1000 BP this turn when played by an effect rather than from hand.
+  reg['MHA-2-054'] = {
+    onPlay(G, p, unit) {
+      if (!unit._playedByEffect) return;
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: ถูกเล่นด้วยเอฟเฟกต์ → +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-056 Sato Rikido — [When Attacking] skip its next Stand; [Main][Discard 1] +1000 BP this turn.
+  reg['MHA-2-056'] = {
+    onAttack(G, p, unit) {
+      unit.skipNextStand = true;
+      log(`${unit.card.name}: จะไม่ตั้งขึ้นในรอบถัดไป`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.hand.length) { p.controller.notify?.('ต้องทิ้ง 1 ใบ'); return; }
+      await H.discardFromHand(p);
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: ได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'ทิ้ง 1 → +1000 BP',
+  };
+
+  // 2-057 Togata Mirio — [Main][When in Frontline][1 Per Turn] give another required-energy-4+
+  // character either +1000 BP or [Impact (1)]; [On Retire] return a raid source card to hand.
+  reg['MHA-2-057'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._mirioTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const t = await pickOwnM(p, [...p.front, ...p.energy].filter(u => u !== unit && (u.card.need || 0) >= 4),
+        `${unit.card.name}: เลือก character (energy ≥4)`);
+      if (!t) return;
+      unit._mirioTurn = Engine.G.turn;
+      const pick = await p.controller.chooseOption(p, `${t.card.name}: เลือกผลที่จะให้`,
+        [{ label: '+1000 BP', value: 'bp' }, { label: '[Impact (1)]', value: 'impact' }]);
+      if (pick === 'impact') { t.tempImpact = (t.tempImpact || 0) + 1; log(`${t.card.name}: ได้ [Impact (1)] เทิร์นนี้`); }
+      else { t.bpMod += 1000; log(`${t.card.name}: ได้ +1000 BP เทิร์นนี้`); }
+    },
+    mainLabel: 'ให้ +1000 BP หรือ [Impact (1)]',
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving === unit) unit._raidSource = unit.under.slice();
+      return false;
+    },
+    onSideline(G, p, unit) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      if (!src.length) return;
+      const i = p.sideline.lastIndexOf(src[0]);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.hand.push(src[0]);
+      log(`${unit.card.name}: ${byNo(src[0])?.name} กลับเข้ามือ`);
+    },
+  };
+
+  // 2-060 Hado Nejire — +1 generated energy while another required-energy-4+ character is out.
+  reg['MHA-2-060'] = {
+    genMod(unit, p) {
+      return [...p.front, ...p.energy].some(u => u !== unit && (u.card.need || 0) >= 4) ? 1 : 0;
+    },
+  };
+
+  // 2-072 Mirko — [Main][When in Frontline][Discard 1][1 Per Turn] buff another character;
+  // [When Attacking][1 Per Turn] with 3 or fewer cards in hand, draw 1 and gain +1000 BP.
+  reg['MHA-2-072'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._mirkoTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.hand.length) { p.controller.notify?.('ต้องทิ้ง 1 ใบ'); return; }
+      const t = await pickOwnM(p, [...p.front, ...p.energy].filter(u => u !== unit), `${unit.card.name}: เลือก character รับ +1000 BP และ [Impact (1)]`);
+      if (!t) return;
+      unit._mirkoTurn = Engine.G.turn;
+      await H.discardFromHand(p);
+      t.bpMod += 1000;
+      t.tempImpact = (t.tempImpact || 0) + 1;
+      log(`${t.card.name}: ได้ +1000 BP และ [Impact (1)] เทิร์นนี้`);
+    },
+    mainLabel: 'ทิ้ง 1 → บัฟ +1000 BP + [Impact (1)]',
+    onAttack(G, p, unit) {
+      if (unit._mirkoAtkTurn === Engine.G.turn || p.hand.length > 3) return;
+      unit._mirkoAtkTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: จั่ว 1 ใบ และได้ +1000 BP เทิร์นนี้`);
+    },
+  };
 })();

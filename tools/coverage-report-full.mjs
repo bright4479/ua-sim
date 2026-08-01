@@ -104,6 +104,7 @@ function residualText(c) {
   // by BP2000 or lower characters." drops the "be" and puts the noun last)
   t = t.replace(/(?:This (?:character|card) )?cannot (?:be )?blocked by (?:characters? with (?:BP ?\d+|\d+ ?BP)|(?:BP ?\d+|\d+ ?BP)) or (?:less|lower|more|higher)(?: characters?)?\.?/gi, ' ');
   t = t.replace(/This (?:character|card) cannot (?:move|attack or block|attack|block)\.?/gi, ' ');   // kw.cannotMove / cannotAttack / cannotBlock
+  t = t.replace(/This card cannot be played (?:on|to) (?:the )?(?:Energy|Front) Line\.?/gi, ' ');    // kw.cannotEnterEnergy / cannotEnterFront
   // whole sentences the engine already implements (selfGenBonus etc.) — matching only the opening
   // fragment left tails like "the energy it generates by 1" behind and reported false residuals
   t = t.replace(/If this (?:character|card) is active,?\s*(?:increase (?:this (?:character|card)'?s? )?(?:the )?(?:generated energy|energy\s*(?:\[\w+\]\s*)?it generates|card generated energy) by \+?\d+|this character generates (?:addition\w* \+?\d+|\d+ addition\w*)|it gains\s*energy generation)\s*\.?/gi, ' ');
