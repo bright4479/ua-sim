@@ -434,4 +434,167 @@
       if (si >= 0) { p.sideline.splice(si, 1); p.hand.push(unit.no); log(`${unit.card.name}: กลับเข้ามือ`); }
     },
   };
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const confirmK = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnK(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyK(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  // "N or more <colour> cards with different Trait on your area" — this set's recurring counter
+  function distinctTraitsOfColor(p, color) {
+    const traits = new Set();
+    for (const u of [...p.front, ...p.energy]) {
+      if (color && (u.card.color || '').toLowerCase() !== color) continue;
+      for (const t of (u.card.traits || '').split('/')) if (t.trim()) traits.add(t.trim().toLowerCase());
+    }
+    return traits.size;
+  }
+  const namedOn = (p, n) => [...p.front, ...p.energy].some(u => (u.card.name || '').includes(n));
+
+  // 1-002 Ordo — [Your Turn] +1000 BP with 3 or more yellow cards of differing Traits on your area.
+  reg['UA48BT-KGD-1-002'] = {
+    bpBonus(p, unit) { return isYourTurn(p) && distinctTraitsOfColor(p, 'yellow') >= 3 ? 1000 : 0; },
+  };
+
+  // 1-016 Bam Yu — +1000 BP while a <Ka Rin> is on your area.
+  reg['UA48BT-KGD-1-016'] = {
+    bpBonus(p, unit) { return namedOn(p, 'Ka Rin') ? 1000 : 0; },
+  };
+
+  // 1-017 Rin Bu Kun — [On Play] pitch 1 to free-play a yellow Chu card (need ≤2) in active;
+  // [Main][1 Per Turn] set itself active while its BP is 5000 or more.
+  reg['UA48BT-KGD-1-017'] = {
+    async onPlay(G, p, unit) {
+      const fits = c => c && c.type === 'Character' && (c.color || '').toLowerCase() === 'yellow' &&
+        (c.traits || '').includes('Chu') && (c.need || 0) <= 2;
+      if (!p.hand.length || !p.sideline.some(no => fits(byNo(no)))) return;
+      if (!await confirmK(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อลง Chu จาก Outside Area?`)) return;
+      await H.discardFromHand(p);
+      const i = p.sideline.findIndex(no => fits(byNo(no)));
+      if (i >= 0) await Engine.playCardFromZone(p, p.sideline[i], 'sideline', { line: 'front', active: true });
+    },
+    async onMain(G, p, unit) {
+      if (unit._standTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (Engine.bp(unit) < 5000) { p.controller.notify?.('BP ต้อง 5000 ขึ้นไป'); return; }
+      unit._standTurn = Engine.G.turn;
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น`);
+    },
+    mainLabel: 'ตั้งการ์ดนี้ขึ้น (BP 5000+)',
+  };
+
+  // 1-035 Ou Ki — retires itself at the start of your turn; [On Play] pitch 1 to set another
+  // character active.
+  reg['UA48BT-KGD-1-035'] = {
+    async onTurnStart(G, p, unit) {
+      if (!isYourTurn(p)) return;
+      await Engine.sidelineUnit(p, unit, 'effect');
+    },
+    async onPlay(G, p, unit) {
+      if (!p.hand.length) return;
+      if (!await confirmK(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อตั้ง character อื่นขึ้น?`)) return;
+      await H.discardFromHand(p);
+      const t = await pickOwnK(p, [...p.front, ...p.energy].filter(u => u !== unit && u.rested),
+        `${unit.card.name}: เลือก character ตั้งขึ้น`);
+      if (t) { t.rested = false; log(`${t.card.name}: ตั้งขึ้น`); }
+    },
+  };
+
+  // 1-040 Mou Ten — [On Play] draw 2 (3 with both <Shin> and <Ou Hon> on your Front Line), pitch 1.
+  reg['UA48BT-KGD-1-040'] = {
+    async onPlay(G, p, unit) {
+      const both = p.front.some(u => (u.card.name || '').includes('Shin')) &&
+                   p.front.some(u => (u.card.name || '').includes('Ou Hon'));
+      const n = both ? 3 : 2;
+      Engine.draw(p, n);
+      log(`${unit.card.name}: จั่ว ${n} ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 1-044 Ou Hon — unblocked attacks draw 1, or 2 with both allies out; [On Play] debuff an enemy.
+  reg['UA48BT-KGD-1-044'] = {
+    async onPlay(G, p, unit) {
+      const t = await pickEnemyK(p, Engine.opponentOf(p).front.filter(u => Engine.bp(u) >= 1500),
+        `${unit.card.name}: เลือก character ศัตรู (BP ≥1500) รับ -1000 BP`);
+      if (!t) return;
+      t.bpMod -= 1000;
+      log(`${t.card.name}: -1000 BP เทิร์นนี้`);
+    },
+    onAnyUnblockedAttack(G, p, atk, unit) {
+      if (atk !== unit) return;
+      const both = p.front.some(u => (u.card.name || '').includes('Shin')) &&
+                   p.front.some(u => (u.card.name || '').includes('Mou Ten'));
+      const n = both ? 2 : 1;
+      Engine.draw(p, n);
+      log(`${unit.card.name}: โจมตีไม่ถูกบล็อก → จั่ว ${n} ใบ`);
+    },
+  };
+
+  // 1-049 Kyou Kai — [On Play] with 4+ differently-named Hi Shin Unit cards, pitch 1 to fetch a
+  // cheap blue Event from your Outside Area.
+  reg['UA48BT-KGD-1-049'] = {
+    async onPlay(G, p, unit) {
+      const names = new Set([...p.front, ...p.energy]
+        .filter(u => (u.card.traits || '').includes('Hi Shin Unit')).map(u => u.card.name));
+      if (names.size < 4 || !p.hand.length) return;
+      if (!await confirmK(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อเอา Event สีน้ำเงินเข้ามือ?`)) return;
+      await H.discardFromHand(p);
+      await H.fetchFromSideline(p, c => c.type === 'Event' && (c.color || '').toLowerCase() === 'blue' && (c.need || 0) <= 2,
+        `${unit.card.name}: เลือก Event สีน้ำเงิน (energy ≤2) เข้ามือ`);
+    },
+  };
+
+  // 1-055 Shin — [1 Per Turn] when one of your characters raids on your turn, set this one active
+  // and give it +1000 BP. A raid is the only way a played unit arrives with cards underneath it.
+  reg['UA48BT-KGD-1-055'] = {
+    async onAnyPlay(G, p, played, unit) {
+      if (!isYourTurn(p) || played === unit) return;
+      if (!played.under || !played.under.length) return;
+      if (unit._shinTurn === Engine.G.turn) return;
+      if (!await confirmK(p, `${unit.card.name}: ตั้งขึ้นและรับ +1000 BP?`)) return;
+      unit._shinTurn = Engine.G.turn;
+      unit.rested = false;
+      unit.bpMod += 1000;
+      log(`${unit.card.name}: ตั้งขึ้นและได้ +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 1-061 "Rewarding Merit" — at the end of your Attack Phase, rest this Field and pay 1 AP to draw.
+  reg['UA48BT-KGD-1-061'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (unit.rested || Engine.activeAP(p) < 1) return;
+      if (!await confirmK(p, `${unit.card.name}: วางนอน Field และจ่าย 1 AP เพื่อจั่ว 1?`)) return;
+      if (!Engine.payApForEffect(p, 1)) return;
+      unit.rested = true;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 1-070 Ei Sei — [Main][When in Frontline][Rest this card][1 Per Turn] set another character
+  // active, with +2000 BP if its required energy is 0.
+  reg['UA48BT-KGD-1-070'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      if (unit._eiseiTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const t = await pickOwnK(p, [...p.front, ...p.energy].filter(u => u !== unit),
+        `${unit.card.name}: เลือก character ตั้งขึ้น`);
+      if (!t) return;
+      unit._eiseiTurn = Engine.G.turn;
+      unit.rested = true;
+      t.rested = false;
+      if ((t.card.need || 0) === 0) { t.bpMod += 2000; log(`${t.card.name}: ตั้งขึ้นและได้ +2000 BP เทิร์นนี้`); }
+      else log(`${t.card.name}: ตั้งขึ้น`);
+    },
+    mainLabel: 'ตั้ง character อื่นขึ้น',
+  };
 })();

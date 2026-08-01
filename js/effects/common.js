@@ -249,6 +249,10 @@
     // like the actual clause start (bracket tag / capital / <name> / bullet), so genuine leading
     // numbers in prose ("1 of your other...") are left alone.
     t = t.replace(/^\s*-?\d+\s*(?=\[|[A-Z<•])/, '');
+    // 70 cards write the trait in SQUARE brackets ("[Trait: Chu]") where the rest of the database
+    // uses angle brackets. Every trait matcher keys on the angle form, so those conditions silently
+    // never fired. No keyword tag is named "Trait", so this rewrite cannot swallow a real one.
+    t = t.replace(/\[Trait:?\s*([^\]]+)\]/gi, '<Trait: $1>');
     t = t.replace(/\binto (?:your|the) hand\b/gi, 'to your hand');
     t = t.replace(/\bLook at (?:your )?top (\d+)/gi, 'Look at the top $1');
     t = t.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|twelve|twenty)\b/gi, w => NUM_WORDS[w.toLowerCase()]);
