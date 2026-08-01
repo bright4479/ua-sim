@@ -1183,4 +1183,266 @@
       return true;
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const isMyTurn = p => Engine.G.players[Engine.G.active] === p;
+  const origBp = u => u.card.bp || 0;
+  const confirmA = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnA(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyA(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  // "All characters on your opponent's Front Line with BP N or more gain -M BP during this turn."
+  function debuffEnemyAbove(p, minBp, amount, why) {
+    const enemy = Engine.opponentOf(p);
+    let n = 0;
+    for (const u of enemy.front) if (Engine.bp(u) >= minBp) { u.bpMod -= amount; n++; }
+    if (n) log(`${why}: character ศัตรู ${n} ใบ -${amount} BP เทิร์นนี้`);
+  }
+
+  // 2-009 Mephisto, The Singer — [On Retire] every enemy Front Line character with BP 1500 or more
+  // gets -1000 BP this turn. Its [Main] re-runs this through the generic reactivation pattern.
+  reg['EX11BT-ARK-2-009'] = {
+    onSideline(G, p, unit) { debuffEnemyAbove(p, 1500, 1000, unit.card.name); },
+  };
+
+  // 2-018 Nearl — [On Retire] with 6 or less Life, discard 1 to place this card face-up in your
+  // Life Area. (The simulator has no face-up Life state, so it simply returns to Life.)
+  reg['EX11BT-ARK-2-018'] = {
+    async onSideline(G, p, unit) {
+      if (p.life.length > 6 || !p.hand.length) return;
+      if (!await confirmA(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อเอาการ์ดนี้ไป Life Area?`)) return;
+      await H.discardFromHand(p);
+      const i = p.sideline.lastIndexOf(unit.no);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.life.push(unit.no);
+      log(`${unit.card.name}: เข้า Life Area`);
+    },
+  };
+
+  // 2-023 Rosmontis — [Main][When in Frontline][1 Per Turn] draw 1, then every enemy Front Line
+  // character with BP 2500 or more gets -2000 BP this turn.
+  reg['EX11BT-ARK-2-023'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._rosTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._rosTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      debuffEnemyAbove(p, 2500, 2000, unit.card.name);
+    },
+    mainLabel: 'จั่ว 1 + ลด BP ศัตรู',
+  };
+
+  // 2-037 Ch'en — [Main][When in Frontline][1 Per Turn] move 1 card from your Outside Area to the
+  // Remove Area.
+  reg['EX11BT-ARK-2-037'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._chenTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.sideline.length) { p.controller.notify?.('Outside Area ว่าง'); return; }
+      unit._chenTurn = Engine.G.turn;
+      p.removal.push(p.sideline.shift());
+      log(`${unit.card.name}: ส่ง 1 ใบจาก Outside Area ไป Remove Area`);
+    },
+    mainLabel: 'ส่ง 1 ใบไป Remove Area',
+  };
+
+  // 2-044 Talulah — [On Play] an enemy Front Line character gets -5000 BP this turn;
+  // [Main][When in Frontline][1 Per Turn] with a face-down card under this one, -2000 BP until the
+  // start of your next turn.
+  reg['EX11BT-ARK-2-044'] = {
+    async onPlay(G, p, unit) {
+      const t = await pickEnemyA(p, Engine.opponentOf(p).front, `${unit.card.name}: เลือก character ศัตรู รับ -5000 BP`);
+      if (!t) return;
+      t.bpMod -= 5000;
+      log(`${t.card.name}: -5000 BP เทิร์นนี้`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._talTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!unit.counters.length) { p.controller.notify?.('ต้องมีการ์ดคว่ำใต้การ์ดนี้'); return; }
+      const t = await pickEnemyA(p, Engine.opponentOf(p).front, `${unit.card.name}: เลือก character ศัตรู รับ -2000 BP`);
+      if (!t) return;
+      unit._talTurn = Engine.G.turn;
+      t.bpPersist -= 2000;
+      log(`${t.card.name}: -2000 BP จนถึงต้นเทิร์นหน้า`);
+    },
+    mainLabel: 'ลด BP ศัตรู 2000 (ถึงต้นเทิร์นหน้า)',
+  };
+
+  // 2-050 Amiya — [1 Per Turn] an unblocked attack moves 1 card from your Outside Area to the
+  // Remove Area.
+  reg['EX11BT-ARK-2-050'] = {
+    onAnyUnblockedAttack(G, p, atk, unit) {
+      if (atk !== unit || unit._amiyaTurn === Engine.G.turn || !p.sideline.length) return;
+      unit._amiyaTurn = Engine.G.turn;
+      p.removal.push(p.sideline.shift());
+      log(`${unit.card.name}: ส่ง 1 ใบจาก Outside Area ไป Remove Area`);
+    },
+  };
+
+  // 1-012 W — moving between lines triggers a different effect in each direction.
+  reg['UA30BT-ARK-1-012'] = {
+    async onAnyMove(G, p, moved, unit) {
+      if (moved !== unit) return;
+      if (p.front.includes(unit)) {
+        await H.fetchFromSideline(p, c => c.type === 'Character' && (c.color || '').toLowerCase() === 'yellow' && (c.need || 0) === 0,
+          `${unit.card.name}: เลือก character สีเหลือง (energy 0) เข้ามือ`);
+        return;
+      }
+      const t = await pickEnemyA(p, Engine.opponentOf(p).front.filter(u => Engine.bp(u) >= 1000),
+        `${unit.card.name}: เลือก character ศัตรู (BP ≥1000) รับ -500 BP`);
+      if (!t) return;
+      t.bpMod -= 500;
+      log(`${t.card.name}: -500 BP เทิร์นนี้`);
+    },
+  };
+
+  // 1-027 FrostNova — at the start of your Main Phase, pay a Life card or retire this character;
+  // [Main][When in Frontline][Rest this card] rest up to 2 enemy Front Line characters and make
+  // them skip their next Stand.
+  reg['UA30BT-ARK-1-027'] = {
+    async onTurnStart(G, p, unit) {
+      if (!isMyTurn(p)) return;
+      const pay = p.life.length > 0 && await confirmA(p, `${unit.card.name}: ส่งการ์ด Life 1 ใบไป Outside Area? (ไม่งั้นต้อง retire การ์ดนี้)`);
+      if (pay) {
+        p.sideline.push(p.life.shift());
+        log(`${unit.card.name}: ส่งการ์ด Life 1 ใบไป Outside Area`);
+        return;
+      }
+      await Engine.sidelineUnit(p, unit, 'effect');
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      if (unit._frostTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._frostTurn = Engine.G.turn;
+      unit.rested = true;
+      for (let i = 0; i < 2; i++) {
+        const t = await H.restEnemyFront(p);
+        if (!t) break;
+        t.skipNextStand = true;
+        log(`${t.card.name}: จะไม่ตั้งขึ้นในรอบถัดไป`);
+      }
+    },
+    mainLabel: 'วางนอนศัตรู 2 ใบ (ไม่ตั้งขึ้นรอบถัดไป)',
+  };
+
+  // 1-030 "Burning Breath" — send an enemy Front Line character to the Remove Area.
+  reg['UA30BT-ARK-1-030'] = {
+    async onEvent(G, p, card) {
+      const enemy = Engine.opponentOf(p);
+      const t = await pickEnemyA(p, enemy.front, 'Burning Breath: เลือก character ศัตรูไป Remove Area');
+      if (!t) return;
+      await Engine.sidelineUnit(enemy, t, 'effect');
+      const i = enemy.sideline.lastIndexOf(t.no);
+      if (i >= 0) { enemy.sideline.splice(i, 1); enemy.removal.push(t.no); }
+      log(`${t.card.name}: ไป Remove Area`);
+    },
+  };
+
+  // 1-068 Franka — [When Attacking] with a printed-BP-2500 character on your Front Line, +2000 BP
+  // and [Impact (1)] this turn; [On Block] -2000 BP this turn.
+  reg['UA30BT-ARK-1-068'] = {
+    onAttack(G, p, unit) {
+      if (!p.front.some(u => origBp(u) === 2500)) return;
+      unit.bpMod += 2000;
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ +2000 BP และ [Impact (1)] เทิร์นนี้`);
+    },
+    onBlock(G, p, unit) {
+      unit.bpMod -= 2000;
+      log(`${unit.card.name}: -2000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 1-072 Exusiai — at the end of this character's attack, rest an active printed-BP-2500 Energy
+  // Line character to set this one active for -1500 BP this turn.
+  async function exusiaiRefresh(p, unit) {
+    if (!p.front.includes(unit)) return;
+    if (!Engine.opponentOf(p).front.length) return;
+    const cost = p.energy.filter(u => !u.rested && origBp(u) === 2500);
+    if (!cost.length) return;
+    const c = await pickOwnA(p, cost, `${unit.card.name}: วางนอน character (BP พิมพ์ 2500) บน Energy Line เพื่อตั้งตัวเองขึ้น?`);
+    if (!c) return;
+    c.rested = true;
+    unit.rested = false;
+    unit.bpMod -= 1500;
+    log(`${unit.card.name}: ตั้งขึ้น และ -1500 BP เทิร์นนี้`);
+  }
+  reg['UA30BT-ARK-1-072'] = {
+    async onWinBattle(G, p, unit) { await exusiaiRefresh(p, unit); return false; },
+    async onAnyLoseBattle(G, p, atk, enemy, defender, unit) { if (atk === unit) await exusiaiRefresh(p, unit); },
+    async onAnyUnblockedAttack(G, p, atk, unit) { if (atk === unit) await exusiaiRefresh(p, unit); },
+  };
+
+  // 1-076 Texas — [On Play] play a red printed-BP-2500 / AP-1 character from your hand rested (set
+  // active if it lands on the Energy Line); [Main][When in Frontline][Discard 1][1 Per Turn] give a
+  // printed-BP-2500 character +1500 BP this turn.
+  reg['UA30BT-ARK-1-076'] = {
+    async onPlay(G, p, unit) {
+      const i = p.hand.findIndex(no => {
+        const c = byNo(no);
+        return c && c.type === 'Character' && (c.color || '').toLowerCase() === 'red' && (c.bp || 0) === 2500 && (c.ap || 0) === 1;
+      });
+      if (i < 0) return;
+      const line = p.front.length >= 4 ? 'energy' : 'front';
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line, active: line === 'energy' });
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._texasTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.hand.length) { p.controller.notify?.('ต้องทิ้ง 1 ใบ'); return; }
+      const t = await pickOwnA(p, [...p.front, ...p.energy].filter(u => origBp(u) === 2500),
+        `${unit.card.name}: เลือก character (BP พิมพ์ 2500) รับ +1500 BP`);
+      if (!t) return;
+      unit._texasTurn = Engine.G.turn;
+      await H.discardFromHand(p);
+      t.bpMod += 1500;
+      log(`${t.card.name}: ได้ +1500 BP เทิร์นนี้`);
+    },
+    mainLabel: 'ทิ้ง 1 → character BP 2500 รับ +1500 BP',
+  };
+
+  // 1-079 Frostleaf — [On Play] lock an enemy character out of moving until the start of your next turn.
+  reg['UA30BT-ARK-1-079'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const t = await pickEnemyA(p, [...enemy.front, ...enemy.energy], `${unit.card.name}: เลือก character ศัตรู ห้ามย้าย`);
+      if (!t) return;
+      t.tempCannotMove = true;
+      Engine.scheduleDelayedAction(Engine.G.turn + 2, () => { t.tempCannotMove = false; });
+      log(`${t.card.name}: ย้ายไม่ได้จนถึงต้นเทิร์นหน้าของคุณ`);
+    },
+  };
+
+  // 1-083 Swire — both [On Play] and [On Retire] give another character +1000 BP this turn.
+  const swireBuff = async (p, unit) => {
+    const t = await pickOwnA(p, [...p.front, ...p.energy].filter(u => u !== unit), `${unit.card.name}: เลือก character รับ +1000 BP`);
+    if (!t) return;
+    t.bpMod += 1000;
+    log(`${t.card.name}: ได้ +1000 BP เทิร์นนี้`);
+  };
+  reg['UA30BT-ARK-1-083'] = {
+    async onPlay(G, p, unit) { await swireBuff(p, unit); },
+    async onSideline(G, p, unit) { await swireBuff(p, unit); },
+  };
+
+  // 1-086 Ch'en — [On Retire] fetch a <Chi Xiao - Unsheath> or a [Double Block] character from your
+  // Outside Area.
+  reg['UA30BT-ARK-1-086'] = {
+    async onSideline(G, p, unit) {
+      await H.fetchFromSideline(p, c => /Chi Xiao/i.test(c.name || '') || /\[Double Block\]/i.test(c.effect || ''),
+        `${unit.card.name}: เลือกการ์ดเข้ามือ`);
+    },
+  };
 })();

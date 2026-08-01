@@ -129,9 +129,9 @@
     return u;
   }
 
-  async function restEnemyFront(p, bpLimit) {
+  async function restEnemyFront(p, bpLimit, line) {
     const enemy = Engine.opponentOf(p);
-    const units = enemy.front.filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable && !u.tempUntargetable &&
+    const units = (line === 'energy' ? enemy.energy : enemy.front).filter(u => u.card.type === 'Character' && !u.rested && !u.kw.untargetable && !u.tempUntargetable &&
       (bpLimit == null || Engine.bp(u) <= bpLimit));
     if (!units.length) return null;
     const uid = await p.controller.chooseEnemyCharacter(p, units, 'เลือก character ศัตรูให้วางนอน', true);
@@ -222,7 +222,7 @@
     apActive: /^Choose up to (\d+) (?:of your? )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*(?:Choose (?:up to )?1|1 of your)\s+(other )?[Cc]haracters?(?: with <[^>]+>)?(?: on your (?:area|field))?[.,]?\s*(?:and )?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line[.,]?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
-    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s Front Line(?: with BP (\d+) or less)? and rest it\.?$/i,
+    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s (?:Front|Energy) Line(?: with BP (\d+) or less)? and rest it\.?(\s*The (?:next time it would set to active it doesn'?t|chosen character does not set to active the next time it would)\.?)?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     // "other"/"another" is optional — several cards let the buff land on this character itself
@@ -703,7 +703,8 @@
     } else if ((dd = matchDebuffEnemyAny(fx))) {
       await debuffEnemyAny(p, dd.delta, dd);
     } else if ((m = fx.match(RX.onplayRestEnemy))) {
-      await restEnemyFront(p, m[1] ? parseInt(m[1]) : null);
+      const rested = await restEnemyFront(p, m[1] ? parseInt(m[1]) : null, /Energy Line/i.test(fx) ? 'energy' : 'front');
+      if (rested && m[2]) { rested.skipNextStand = true; log(`${rested.card.name}: จะไม่ตั้งขึ้นในรอบถัดไป`); }
     } else if ((m = fx.match(RX.bounceSelfOrOther))) {
       await bounceSelfOrOther(p, unit, parseInt(m[1] || m[2] || m[3]));
     } else if ((rc = matchRetireEnemyConditional(fx))) {
@@ -1592,6 +1593,10 @@
     const fx = findClause(card.effect, /^\[Main\]/i);
     if (!fx) return null;
     let m;
+    // "[Main][When in Frontline][1 Per Turn] Activate this character's [On Play] effect." — 22
+    // cards re-run one of their own hooks from the Main Phase.
+    if ((m = fx.match(/^\[Main\][^.]*?Activate this character'?s \[(On Play|On Retire)\] effect\.?$/i)))
+      return { kind: 'reactivate', hook: /play/i.test(m[1]) ? 'play' : 'retire', frontOnly: /\[When in Frontline\]/i.test(fx), oncePerTurn: /\[1 Per Turn\]/i.test(fx) };
     if ((m = fx.match(RX_SELF_GEN_RETIRE))) return { kind: 'selfGenRetire', n: parseInt(m[1]) };
     if (fx.match(RX_SELF_GEN_RETIRE2)) return { kind: 'selfGenRetire', n: 1 };
     // HTR-style: "This character generates 1 additional [blue] energy. At the end of the main phase, retire this character."
@@ -1810,6 +1815,14 @@
       unit.tempGen += mm.n;
       unit.retireAtEndOfMain = true;
       log(`${unit.card.name}: +${mm.n} energy generation เทิร์นนี้ (จะ retire เมื่อจบ Main Phase)`);
+    } else if (mm.kind === 'reactivate') {
+      if (mm.frontOnly && !p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (mm.oncePerTurn && unit._reactivateTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._reactivateTurn = Engine.G.turn;
+      // route through the dispatchers so a per-card registry entry wins over the generic matchers,
+      // exactly as it would when the hook fires for real
+      if (mm.hook === 'play') await Effects.onPlay(Engine.G, p, unit);
+      else await Effects.onSideline(Engine.G, p, unit, 'effect');
     } else if (mm.kind === 'restBuffOther') {
       if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่ ใช้ ability ไม่ได้'); return; }
       unit.rested = true;
