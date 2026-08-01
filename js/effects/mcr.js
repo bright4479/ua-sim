@@ -850,4 +850,267 @@
       log(`${unit.card.name}: ${t.card.name} ถูกวางนอน, +1 energy generation เทิร์นนี้`);
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const nameHas = (u, s) => (u.card.name || '').includes(s);
+  const ownNameHas = (p, s) => [...p.front, ...p.energy].filter(u => nameHas(u, s));
+  const confirmR = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnR(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyR(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+
+  // 2-003 Sheryl Nome — [Main][1 Per Turn] add 1 card from your Life to your hand.
+  reg['EX14BT-MCR-2-003'] = {
+    async onMain(G, p, unit) {
+      if (unit._lifeTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.life.length) { p.controller.notify?.('ไม่มีการ์ด Life'); return; }
+      unit._lifeTurn = Engine.G.turn;
+      await H.addLifeToHand(p);
+    },
+    mainLabel: 'เพิ่มการ์ด Life 1 ใบเข้ามือ',
+  };
+
+  // 2-016 YF-29 Durandal Valkyrie — [On Play] fetch the named Event from your Outside Area;
+  // [On Retire] on your turn, replay one of its raid source cards in active.
+  reg['EX14BT-MCR-2-016'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => /Sayonara No Tsubasa/i.test(c.name || ''),
+        `${unit.card.name}: เลือก Sayonara No Tsubasa เข้ามือ`);
+    },
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving === unit) unit._raidSource = unit.under.slice();
+      return false;
+    },
+    async onSideline(G, p, unit) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      if (Engine.G.players[Engine.G.active] !== p) return;
+      const no = src.find(n => byNo(n)?.type === 'Character');
+      if (!no) return;
+      const i = p.sideline.lastIndexOf(no);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.deck.unshift(no);
+      await Engine.playCardFromZone(p, no, 'deck', { line: 'front', active: true });
+      const placed = p.front.find(x => x.no === no);
+      if (placed) {
+        placed.tempUnblockableBP = 3000;
+        log(`${byNo(no)?.name}: ไม่ถูกบล็อกโดย BP ≤3000 เทิร์นนี้`);
+      }
+    },
+  };
+
+  // 2-031 Kaname Buccaneer — [On Play] discard 1 to play a purple Walküre card (need <=2) from
+  // your Outside Area rested.
+  reg['EX14BT-MCR-2-031'] = {
+    async onPlay(G, p, unit) {
+      const fits = no => {
+        const c = byNo(no);
+        return c && c.type === 'Character' && (c.color || '').toLowerCase() === 'purple' &&
+          (c.traits || '').includes('Walküre') && (c.need || 0) <= 2;
+      };
+      if (!p.hand.length || !p.sideline.some(fits)) return;
+      if (!await confirmR(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อลง Walküre สีม่วง (energy ≤2) จาก Outside Area?`)) return;
+      await H.discardFromHand(p);
+      const i = p.sideline.findIndex(fits);
+      if (i < 0) return;
+      await Engine.playCardFromZone(p, p.sideline[i], 'sideline', { line: 'front', active: false });
+    },
+  };
+
+  // 2-036 Freyja Wion — [When Attacking] with 3+ differently-named Walküre cards on your area, all
+  // your characters gain +1000 BP this turn.
+  reg['EX14BT-MCR-2-036'] = {
+    onAttack(G, p, unit) {
+      const names = new Set([...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Walküre')).map(u => u.card.name));
+      if (names.size < 3) return;
+      for (const u of [...p.front, ...p.energy]) u.bpMod += 1000;
+      log(`${unit.card.name}: character ทั้งหมดได้ +1000 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-039 Makina Nakajima — [On Play] buff another character by +1000 BP, or +2000 with 5+
+  // differently-named Walküre cards on your area.
+  reg['EX14BT-MCR-2-039'] = {
+    async onPlay(G, p, unit) {
+      const names = new Set([...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Walküre')).map(u => u.card.name));
+      if (names.size < 3) return;
+      const amount = names.size >= 5 ? 2000 : 1000;
+      const t = await pickOwnR(p, [...p.front, ...p.energy].filter(u => u !== unit), `${unit.card.name}: เลือก character รับ +${amount} BP`);
+      if (!t) return;
+      t.bpMod += amount;
+      log(`${t.card.name}: ได้ +${amount} BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-053 VF-31C Siegfried — [Main][When in Frontline][1 Per Turn] choose a "Hayate" character to
+  // draw 1 and give it [Impact (1)] this turn.
+  reg['EX14BT-MCR-2-053'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._hayateTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const t = await pickOwnR(p, ownNameHas(p, 'Hayate'), `${unit.card.name}: เลือก character "Hayate"`);
+      if (!t) return;
+      unit._hayateTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      t.tempImpact = (t.tempImpact || 0) + 1;
+      log(`${unit.card.name}: จั่ว 1 ใบ · ${t.card.name} ได้ [Impact (1)] เทิร์นนี้`);
+    },
+    mainLabel: 'จั่ว 1 + ให้ "Hayate" [Impact (1)]',
+  };
+
+  // 2-067 Roy Focker — [Main][1 Per Turn] usable only while this character's BP is above its
+  // printed value; +1500 BP this turn.
+  reg['EX14BT-MCR-2-067'] = {
+    async onMain(G, p, unit) {
+      if (unit._royTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (Engine.bp(unit) <= (unit.card.bp || 0)) { p.controller.notify?.('BP ต้องสูงกว่าค่าที่พิมพ์ไว้'); return; }
+      unit._royTurn = Engine.G.turn;
+      unit.bpMod += 1500;
+      log(`${unit.card.name}: ได้ +1500 BP เทิร์นนี้`);
+    },
+    mainLabel: '+1500 BP',
+  };
+
+  // 1-009 Sheryl Nome — [Main][When in Frontline][Rest this card] draw 1.
+  reg['UA36BT-MCR-1-009'] = {
+    async onPlay(G, p, unit) {
+      await H.lookTopAndDiscard(p, 3, 3, `${unit.card.name}: ดูการ์ดบนสุด 3 ใบ`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      unit.rested = true;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+    mainLabel: 'จั่ว 1 ใบ',
+  };
+
+  // 1-010 Sheryl Nome — [On Play] draw 1 and rest an enemy Front Line character; [Main][When in
+  // Frontline][Rest this card] make a rested enemy skip its next Stand.
+  reg['UA36BT-MCR-1-010'] = {
+    async onPlay(G, p, unit) {
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.restEnemyFront(p);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const enemy = Engine.opponentOf(p);
+      const t = await pickEnemyR(p, enemy.front.filter(u => u.rested), `${unit.card.name}: เลือก character ศัตรูที่นอนอยู่`);
+      if (!t) return;
+      unit.rested = true;
+      t.skipNextStand = true;
+      log(`${t.card.name}: จะไม่ตั้งขึ้นในรอบถัดไป`);
+    },
+    mainLabel: 'ศัตรูที่นอนอยู่ ไม่ตั้งขึ้นรอบถัดไป',
+  };
+
+  // 1-011 Sheryl Nome — [On Play] fetch a <Sheryl Nome> with required energy 4 or less from your
+  // Outside Area.
+  reg['UA36BT-MCR-1-011'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => /Sheryl Nome/.test(c.name || '') && (c.need || 0) <= 4,
+        `${unit.card.name}: เลือก Sheryl Nome (energy ≤4) เข้ามือ`);
+    },
+    // [Your Turn] +1000 BP and [Impact (1)] with 3+ Sheryl Nome [Raid] cards in your Outside Area
+    bpBonus(p, unit) { return isYourTurn(p) && sherylRaidInSideline(p) >= 3 ? 1000 : 0; },
+    impactBonus(p, unit) { return isYourTurn(p) && sherylRaidInSideline(p) >= 3 ? 1 : 0; },
+  };
+  const sherylRaidInSideline = p => p.sideline.filter(no => {
+    const c = byNo(no);
+    return c && /Sheryl Nome/.test(c.name || '') && /\[Raid\]/i.test(c.effect || '');
+  }).length;
+
+  // 1-020 Ranka Lee — [Your Turn] +500 BP with 3+ differently-named yellow Song (Ranka) cards in
+  // your Outside Area.
+  reg['UA36BT-MCR-1-020'] = {
+    bpBonus(p, unit) {
+      if (!isYourTurn(p)) return 0;
+      const names = new Set(p.sideline.map(byNo).filter(c =>
+        c && (c.color || '').toLowerCase() === 'yellow' && (c.traits || '').includes('Song (Ranka)')).map(c => c.name));
+      return names.size >= 3 ? 500 : 0;
+    },
+  };
+
+  // 1-046 YF-19 (Isamu Dyson) — [On Play] debuff an enemy Front Line character with BP 2500+;
+  // [When Attacking] repeat it while a "Guld" character is on your Front Line.
+  const isamuDebuff = async (p, unit) => {
+    const enemy = Engine.opponentOf(p);
+    const t = await pickEnemyR(p, enemy.front.filter(u => Engine.bp(u) >= 2500), `${unit.card.name}: เลือก character ศัตรู (BP ≥2500) รับ -2000 BP`);
+    if (!t) return;
+    t.bpMod -= 2000;
+    log(`${t.card.name}: -2000 BP เทิร์นนี้`);
+  };
+  reg['UA36BT-MCR-1-046'] = {
+    async onPlay(G, p, unit) { await isamuDebuff(p, unit); },
+    async onAttack(G, p, unit) {
+      if (!p.front.some(u => nameHas(u, 'Guld'))) return;
+      await isamuDebuff(p, unit);
+    },
+  };
+
+  // 1-054 VF-27 Lucifer — [On Play] with a Ranka Lee on your area, discard 1 to bounce an enemy
+  // Front Line character with BP 3500 or less.
+  reg['UA36BT-MCR-1-054'] = {
+    async onPlay(G, p, unit) {
+      if (!ownNameHas(p, 'Ranka Lee').length || !p.hand.length) return;
+      if (!await confirmR(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อคืน character ศัตรู (BP ≤3500) เข้ามือ?`)) return;
+      await H.discardFromHand(p);
+      await H.bounceEnemyFront(p, 3500);
+    },
+  };
+
+  // 1-064 Macross Quarter — two [Main] abilities on one Field card.
+  reg['UA36BT-MCR-1-064'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const opts = [{ label: 'จั่ว 1 ทิ้ง 1', value: 'draw' }];
+      if (p.hand.length >= 2 && Engine.activeAP(p) >= 1) opts.push({ label: 'ทิ้ง 2 + จ่าย 1 AP → retire ศัตรู', value: 'retire' });
+      opts.push({ label: 'ยกเลิก', value: null });
+      const pick = await p.controller.chooseOption(p, `${unit.card.name}: เลือกความสามารถ`, opts);
+      if (!pick) return;
+      if (pick === 'draw') {
+        if (unit._drawTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+        unit._drawTurn = Engine.G.turn;
+        unit.rested = true;
+        Engine.draw(p, 1);
+        log(`${unit.card.name}: จั่ว 1 ใบ`);
+        await H.discardFromHand(p);
+        return;
+      }
+      if (unit._retireTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!Engine.payApForEffect(p, 1)) return;
+      unit._retireTurn = Engine.G.turn;
+      unit.rested = true;
+      await H.discardFromHand(p);
+      await H.discardFromHand(p);
+      await H.retireEnemyFront(p);
+    },
+    mainLabel: 'จั่ว 1 ทิ้ง 1 / ทิ้ง 2 + 1 AP → retire',
+  };
+
+  // 1-067 Lynn Minmay — [Main][When in Frontline][1 Per Turn] every other character on your area
+  // gets +1000 BP this turn.
+  reg['UA36BT-MCR-1-067'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._minmayTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      unit._minmayTurn = Engine.G.turn;
+      let n = 0;
+      for (const u of [...p.front, ...p.energy]) if (u !== unit) { u.bpMod += 1000; n++; }
+      log(`${unit.card.name}: character อื่น ${n} ใบได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'character อื่นทั้งหมด +1000 BP',
+  };
 })();

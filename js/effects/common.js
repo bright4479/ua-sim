@@ -189,6 +189,7 @@
     if (i == null) return null;
     const no = p.life.splice(i, 1)[0];
     p.hand.push(no);
+    p._lifeToHandTurn = Engine.G.turn;   // "if you added a card from your Life to your hand this turn"
     log(`${p.name}: เพิ่ม ${UAData.byNo.get(no)?.name} จาก Life เข้ามือ`);
     return no;
   }
@@ -990,7 +991,7 @@
         continue;
       }
       // "If there is a character with <NAME> in its name on your area, ... +N BP."
-      if ((m = rest.match(/^If there is a character with <([^>]+)>(?: or <([^>]+)>)? in its name (?:on|in) (?:your area|the same line|your field|your Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there is a character with <([^>]+)>(?: or <([^>]+)>)? in its name (?:on|in) (?:your area|the same line|your field|your Front Line), this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
         rules.push({ when, cond: { name: m[1].trim(), altName: m[2] ? m[2].trim() : null, n: 1, zone: 'field' }, amount: parseInt(m[3]) });
         continue;
       }
@@ -1015,7 +1016,7 @@
         continue;
       }
       // "If there are N or more (other) <Trait:X>/<NAME> cards/characters on/in your area/field/Front Line, ... +N BP"
-      if ((m = rest.match(/^If (?:there are|you have) (\d+) or more (other )?<([^>]+)>(?: (?:cards?|characters?))?(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+?(\d+) ?(?:BP)?\.?$/i))) {
+      if ((m = rest.match(/^If (?:there are|there|you have) (\d+) or more (other )?<([^>]+)>(?: (?:cards?|characters?))?(?: with different names)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) (?:BP)?\+?(\d+) ?(?:BP)?\.?$/i))) {
         const raw = m[3].trim();
         const cond = { n: parseInt(m[1]), other: !!m[2], zone: parseZone(m[4]) };
         if (/^Trait:?/i.test(raw)) cond.trait = raw.replace(/^Trait:?\s*/i, '').toLowerCase();
@@ -1036,8 +1037,13 @@
         continue;
       }
       // "If there are N or more <Trait:X> cards without "Y" in their name on your area, ... +M BP."
-      if ((m = rest.match(/^If there are (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+      if ((m = rest.match(/^If there(?: are)? (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
         rules.push({ when, cond: { traitWithoutName: { trait: m[2].trim().toLowerCase(), exclude: m[3].trim(), n: parseInt(m[1]) } }, amount: parseInt(m[4]) });
+        continue;
+      }
+      // "If you added a card from your Life to your hand during this turn, ... +N BP."
+      if ((m = rest.match(/^If you added (?:a|1) card from your Life to your hand during this turn, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { lifeToHand: true }, amount: parseInt(m[1]) });
         continue;
       }
       // "If there is a face-down card under this character, this character gets +N BP."
@@ -1066,7 +1072,7 @@
         continue;
       }
       // "If there are N or more cards without <Trigger> on your area, ... +M BP."
-      if ((m = rest.match(/^If there are (\d+) or more cards without <Trigger> on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+      if ((m = rest.match(/^If there(?: are)? (\d+) or more cards without <Trigger> on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
         rules.push({ when, cond: { noTriggerCount: parseInt(m[1]) }, amount: parseInt(m[2]) });
         continue;
       }
@@ -1104,7 +1110,7 @@
       }
       // "If there are N or more other characters on your area/Front Line, this character gets/gains
       // +M BP." — bare count, no name/trait qualifier (unlike the <NAME>/<Trait:X> rule above).
-      if ((m = rest.match(/^If there are (\d+) or more other characters (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
+      if ((m = rest.match(/^If there(?: are)? (\d+) or more other characters (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { bareOtherCount: parseInt(m[1]), zone: parseZone(m[2]) }, amount: parseInt(m[3]) });
         continue;
       }
@@ -1125,6 +1131,7 @@
             const pool = [...owner.front, ...owner.energy];
             if (pool.filter(u => traitMatches(u.card.traits, trait) && !(u.card.name || '').includes(exclude)).length < n) continue;
           }
+          else if (r.cond.lifeToHand) { if (owner._lifeToHandTurn !== Engine.G.turn) continue; }
           else if (r.cond.faceDown != null) { if ((unit.counters || []).length < r.cond.faceDown) continue; }
           else if (r.cond.usedEvent) { if (!owner._eventsUsedThisTurn) continue; }
           else if (r.cond.zoneCount) { if (owner[r.cond.zoneCount.zone].length < r.cond.zoneCount.n) continue; }
@@ -1183,15 +1190,15 @@
       const names = [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim());
       return allNamesPresent(names, parseZone(m[4]));
     }
-    if ((m = text.match(/^If (?:there is|you have) an? <([^>]+)> (?:on your area|in your field|on your field)$/i))) {
+    if ((m = text.match(/^If (?:there is|you have) an? <([^>]+)> (?:on your area|in your field|on your field|on your Front Line)$/i))) {
       const name = m[1].trim();
       return (owner, unit) => countMatching(owner, unit, { name }) >= 1;
     }
-    if ((m = text.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?)(?: with different names)? on your area$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?)(?: with different names)? on your area$/i))) {
       const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase();
       return (owner, unit) => countMatching(owner, unit, { trait, other }) >= need;
     }
-    if ((m = text.match(/^If there are (\d+) or more (other )?<([^>]+)> (?:cards?|characters?) on your area$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more (other )?<([^>]+)> (?:cards?|characters?) on your area$/i))) {
       const need = parseInt(m[1]), other = !!m[2], name = m[3].trim();
       return (owner, unit) => countMatching(owner, unit, { name, other }) >= need;
     }
@@ -1212,7 +1219,7 @@
       return owner => (more ? owner[zone].length >= n : owner[zone].length <= n);
     }
     // counts of named/trait cards sitting in the Outside or Remove Area
-    if ((m = text.match(/^If there are (\d+) or more (?:<Trait:?\s*([^>]+)>|<([^>]+)>) cards?(?: with different names)? (?:on|in) your (Outside Area|Remove Area)$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more (?:<Trait:?\s*([^>]+)>|<([^>]+)>) cards?(?: with different names)? (?:on|in) your (Outside Area|Remove Area)$/i))) {
       const need = parseInt(m[1]), trait = m[2]?.trim().toLowerCase(), name = m[3]?.trim();
       const zone = /remove/i.test(m[4]) ? 'removal' : 'sideline';
       const distinct = /different names/i.test(text);
@@ -1222,7 +1229,7 @@
         return (distinct ? new Set(hits.map(c => c.name)).size : hits.length) >= need;
       };
     }
-    if ((m = text.match(/^If there are (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
       const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
       return owner => owner[zone].length >= need;
     }
@@ -1231,13 +1238,13 @@
       const names = [m[1].trim(), m[2]?.trim()].filter(Boolean);
       return owner => names.some(n => countMatching(owner, null, { name: n }) >= 1);
     }
-    if ((m = text.match(/^If there are (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area$/i))) {
       const need = parseInt(m[1]), trait = m[2].trim().toLowerCase(), exclude = m[3].trim();
       return owner => [...owner.front, ...owner.energy]
         .filter(u => traitMatches(u.card.traits, trait) && !(u.card.name || '').includes(exclude)).length >= need;
     }
     // NIK counts cards by whether they carry a Trigger
-    if ((m = text.match(/^If there are (\d+) or more cards without <Trigger> on your area$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more cards without <Trigger> on your area$/i))) {
       const need = parseInt(m[1]);
       return owner => countNoTrigger(owner) >= need;
     }
@@ -1277,12 +1284,12 @@
       return owner => Object.values(Engine.energyGen(owner)).reduce((a, b) => a + b, 0) >= need;
     }
     // "If there are N or more characters on your area with BP M or more"
-    if ((m = text.match(/^If there are (\d+) or more characters on your area with BP (\d+) or more$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more characters on your area with BP (\d+) or more$/i))) {
       const need = parseInt(m[1]), bpMin = parseInt(m[2]);
       return owner => [...owner.front, ...owner.energy].filter(u => Engine.bp(u) >= bpMin).length >= need;
     }
     // "If there are N or more characters on your opponent's Front Line"
-    if ((m = text.match(/^If there are (\d+) or more characters on your opponent'?s Front Line$/i))) {
+    if ((m = text.match(/^If there(?: are)? (\d+) or more characters on your opponent'?s Front Line$/i))) {
       const need = parseInt(m[1]);
       return owner => Engine.opponentOf(owner).front.length >= need;
     }
@@ -1376,6 +1383,25 @@
 
   function parseTierRules(card) {
     const segs = (card.effect || '').split('@').map(s => normalizeFx(s.trim()));
+    // a second shape gates the whole bullet list on one condition rather than on a count:
+    //   If there is a <Ranka Lee> on your Front Line, this character gains all the following effects.
+    //   @• [Impact (1)]
+    const gateAt = segs.findIndex(s => /^If .*, this character gains all (?:of )?the following effects\.?$/i.test(s));
+    if (gateAt >= 0) {
+      const cond = parseKeywordCondition(segs[gateAt].replace(/,\s*this character gains all (?:of )?the following effects\.?$/i, '').trim());
+      if (cond) {
+        const bp = [], kw = [];
+        for (let i = gateAt + 1; i < segs.length; i++) {
+          const body = segs[i].replace(/^[•·・*-]\s*/, '');
+          if (body === segs[i]) continue;                 // only bullet lines belong to the list
+          for (const b of parseTierBody(body)) {
+            if (b.bp) bp.push({ when: b.when, cond: { tier: cond }, amount: b.amount });
+            else kw.push({ when: b.when, cond, kind: b.kind, amount: b.amount, flag: b.flag });
+          }
+        }
+        if (bp.length || kw.length) return { bp, kw };
+      }
+    }
     const head = segs.findIndex(s => RX_TIER_HEAD.test(s));
     if (head < 0) return { bp: [], kw: [] };
     const count = parseTierBase((segs[head].match(RX_TIER_HEAD) || [])[1]?.trim() || '');
@@ -1473,7 +1499,7 @@
   const genEvalCache = new Map();
   function buildGenEvaluator(card) {
     for (const clause of (card.effect || '').split('@').map(s => normalizeFx(s.trim()))) {
-      const m = clause.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards? |characters? )?(?:on|in) your (?:area|field), this (?:field|character|card)'?s? generates? additional (\d+)/i);
+      const m = clause.match(/^If there(?: are)? (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards? |characters? )?(?:on|in) your (?:area|field), this (?:field|character|card)'?s? generates? additional (\d+)/i);
       if (m) {
         const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase(), amt = parseInt(m[5]);
         return (owner, unit) => {
@@ -1535,7 +1561,7 @@
 
       // "If there are N or more (other) <Trait:X> cards on your area, this character (also/can)
       // generates energy on the Front Line" (mirrors the plain-BP evaluator's count-gate)
-      m = rest.match(/^If there are (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?) (?:on|in) your area, this character (?:also |can )?/i);
+      m = rest.match(/^If there(?: are)? (\d+) or more (other )?<Trait:?\s*([^>]+)> (?:cards?|characters?) (?:on|in) your area, this character (?:also |can )?/i);
       if (m && new RegExp(grantTail, 'i').test(rest)) {
         const need = parseInt(m[1]), other = !!m[2], trait = m[3].trim().toLowerCase();
         return (owner, unit) => [...owner.front, ...owner.energy].filter(u =>
