@@ -263,7 +263,7 @@ const GameUI = (() => {
 
   function unitHtml(u, mine, owner) {
     return `<div class="unit ${u.rested ? 'rested' : ''} ${mine ? 'mine' : 'foe'}"
-        draggable="${mine}" data-uid="${u.uid}" data-mine="${mine ? 1 : 0}">
+        draggable="${mine}" data-uid="${u.uid}" data-no="${u.no}" data-mine="${mine ? 1 : 0}">
       ${UAData.imgTag(u.card)}
       ${keywordBadges(u, owner)}
       <div class="unit-bp">${u.card.bp != null ? Engine.bp(u) : ''}${(u.bpMod || u.bpPersist) ? `<span class="bpmod">${(u.bpMod + u.bpPersist) > 0 ? '+' : ''}${u.bpMod + u.bpPersist}</span>` : ''}${u.under.length ? `<span class="raidn">⚡${u.under.length}</span>` : ''}${u.counters.length ? `<span class="raidn">●${u.counters.length}</span>` : ''}</div>
@@ -437,6 +437,7 @@ const GameUI = (() => {
       el.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'hand', i: parseInt(el.dataset.i), no: el.dataset.no }));
       });
+      addLongPressPreview(el, () => el.dataset.no);
     });
 
     // units: click + drag (mine) + raid drop target
@@ -452,6 +453,7 @@ const GameUI = (() => {
       }
       el.addEventListener('dragover', e => { e.preventDefault(); });
       el.addEventListener('drop', e => onDropOnUnit(e, uid, mine));
+      addLongPressPreview(el, () => el.dataset.no);
     });
 
     // my lines: drop targets
@@ -711,8 +713,53 @@ const GameUI = (() => {
   async function start(playerDeck, botDeck, botName) {
     Engine.G.onUpdate = render;
     Engine.G.onLog = showEventToast;
+    fitStage();
     await Engine.startGame(playerDeck, botDeck, humanController, makeBotController(), 'คุณ', botName);
   }
 
-  return { start, render, humanController };
+  // ---------- long-press to inspect ----------
+  // A phone has no hover, and a tap plays the card, so there was no way to read one before
+  // committing to it. Holding for ~450ms opens the full-size card modal instead; the modal lives
+  // on document.body, outside the scaled stage, so it renders at full resolution.
+  function addLongPressPreview(el, getNo) {
+    let timer = null, startX = 0, startY = 0, fired = false;
+    const clear = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      startX = t.clientX; startY = t.clientY; fired = false;
+      timer = setTimeout(() => { fired = true; showCardModal(getNo()); }, 450);
+    }, { passive: true });
+    // a scroll/drag past a few pixels is not a long press
+    el.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - startX) > 8 || Math.abs(t.clientY - startY) > 8) clear();
+    }, { passive: true });
+    el.addEventListener('touchend', e => {
+      clear();
+      if (fired) e.preventDefault();   // swallow the click that would otherwise play the card
+    });
+    el.addEventListener('touchcancel', clear);
+  }
+
+  // ---------- scale-to-fit ----------
+  // The board is built at a fixed height (STAGE_H) and scaled as a single piece, so every screen
+  // sees the desktop layout rather than a reflowed one. Width follows the screen's aspect ratio so
+  // there are no side bars on wide phones, clamped so the mat never becomes absurdly stretched.
+  const STAGE_H = 860, STAGE_W_MIN = 1180, STAGE_W_MAX = 2200;
+  function fitStage() {
+    const el = root();
+    if (!el) return;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (!vw || !vh) return;
+    const w = Math.min(STAGE_W_MAX, Math.max(STAGE_W_MIN, Math.round((vw / vh) * STAGE_H)));
+    el.style.setProperty('--stage-w', w + 'px');
+    el.style.setProperty('--stage-h', STAGE_H + 'px');
+    el.style.setProperty('--stage-scale', Math.min(vw / w, vh / STAGE_H).toFixed(4));
+  }
+  addEventListener('resize', fitStage);
+  addEventListener('orientationchange', () => setTimeout(fitStage, 120));
+  if (document.readyState === 'loading') addEventListener('DOMContentLoaded', fitStage);
+  else fitStage();
+
+  return { start, render, humanController, fitStage };
 })();
