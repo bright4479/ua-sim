@@ -936,6 +936,31 @@
     }).length;
   }
 
+  // Trait names in card TEXT do not always match the trait FIELD exactly — the data carries
+  // "Amanogawa Gakuen High School" in text against "Amanogawa High School" on the card, and
+  // "Holy Four Sword" against "Four Holy Swords". Fall back to comparing token sets (singularised,
+  // order-independent) when the plain substring test fails. A one-word trait still has to match
+  // exactly, so short names like "Walkure" cannot be absorbed into a longer trait.
+  // single-letter tokens are dropped so that acronyms ("A.I.M.S. SQUAD", "S.M.S") cannot dissolve
+  // into each other once punctuation is stripped
+  const traitTokens = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/).map(t => t.replace(/s$/, '')).filter(t => t.length >= 2);
+  function traitMatches(traitsField, wanted) {
+    const have = (traitsField || '').toLowerCase();
+    const want = (wanted || '').toLowerCase();
+    if (!want) return false;
+    if (have.includes(want)) return true;
+    const wantTok = traitTokens(want);
+    if (wantTok.length < 2) return false;
+    for (const one of (traitsField || '').split('/')) {
+      const haveTok = traitTokens(one);
+      if (haveTok.length < 2) continue;
+      const [small, big] = haveTok.length <= wantTok.length ? [haveTok, wantTok] : [wantTok, haveTok];
+      if (small.every(t => big.includes(t))) return true;
+    }
+    return false;
+  }
+
   function countMatching(owner, unit, { name, altName, trait, other, zone }) {
     const pool = zone === 'front' ? owner.front : [...owner.front, ...owner.energy];
     return pool.filter(u => {
@@ -944,7 +969,7 @@
         const hits = n => (u.card.name || '').includes(n) || (u.kw?.alsoTreatedAs || []).some(a => a.includes(n));
         if (!hits(name) && !(altName && hits(altName))) return false;
       }
-      if (trait && !(u.card.traits || '').toLowerCase().includes(trait)) return false;
+      if (trait && !traitMatches(u.card.traits, trait)) return false;
       return true;
     }).length;
   }
@@ -1002,6 +1027,17 @@
       // "If there are <A> and <B> on your area, this character gets +N BP." — all names at once
       if ((m = rest.match(/^If there (?:are|is) <([^>]+)> and <([^>]+)>(?: and <([^>]+)>)? (?:on|in) your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP\.?$/i))) {
         rules.push({ when, cond: { allNames: [m[1], m[2], m[3]].filter(Boolean).map(s => s.trim()), zone: parseZone(m[4]) }, amount: parseInt(m[5]) });
+        continue;
+      }
+      // Kamen Rider names the card in quotes rather than angle brackets: "If there is a character
+      // with "Decade" or "Diend" in its name on your area, this character gains +1000 BP."
+      if ((m = rest.match(/^If there is a character with "([^"]+)"(?: or "([^"]+)")? in (?:its|their) name on your (area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { name: m[1].trim(), altName: m[2] ? m[2].trim() : null, n: 1, zone: parseZone(m[3]) }, amount: parseInt(m[4]) });
+        continue;
+      }
+      // "If there are N or more <Trait:X> cards without "Y" in their name on your area, ... +M BP."
+      if ((m = rest.match(/^If there are (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { traitWithoutName: { trait: m[2].trim().toLowerCase(), exclude: m[3].trim(), n: parseInt(m[1]) } }, amount: parseInt(m[4]) });
         continue;
       }
       // "If there is a face-down card under this character, this character gets +N BP."
@@ -1084,6 +1120,11 @@
         if (r.cond) {
           if (r.cond.tier) { if (!r.cond.tier(owner, unit)) continue; }
           else if (r.cond.allNames) { if (!allNamesPresent(r.cond.allNames, r.cond.zone)(owner, unit)) continue; }
+          else if (r.cond.traitWithoutName) {
+            const { trait, exclude, n } = r.cond.traitWithoutName;
+            const pool = [...owner.front, ...owner.energy];
+            if (pool.filter(u => traitMatches(u.card.traits, trait) && !(u.card.name || '').includes(exclude)).length < n) continue;
+          }
           else if (r.cond.faceDown != null) { if ((unit.counters || []).length < r.cond.faceDown) continue; }
           else if (r.cond.usedEvent) { if (!owner._eventsUsedThisTurn) continue; }
           else if (r.cond.zoneCount) { if (owner[r.cond.zoneCount.zone].length < r.cond.zoneCount.n) continue; }
@@ -1184,6 +1225,16 @@
     if ((m = text.match(/^If there are (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
       const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
       return owner => owner[zone].length >= need;
+    }
+    // quoted-name forms, used throughout the Kamen Rider sets
+    if ((m = text.match(/^If there is a character with "([^"]+)"(?: or "([^"]+)")? in (?:its|their) name on your (?:area|field|Front Line)$/i))) {
+      const names = [m[1].trim(), m[2]?.trim()].filter(Boolean);
+      return owner => names.some(n => countMatching(owner, null, { name: n }) >= 1);
+    }
+    if ((m = text.match(/^If there are (\d+) or more <Trait:?\s*([^>]+)> cards without "([^"]+)" in (?:their|its) name on your area$/i))) {
+      const need = parseInt(m[1]), trait = m[2].trim().toLowerCase(), exclude = m[3].trim();
+      return owner => [...owner.front, ...owner.energy]
+        .filter(u => traitMatches(u.card.traits, trait) && !(u.card.name || '').includes(exclude)).length >= need;
     }
     // NIK counts cards by whether they carry a Trigger
     if ((m = text.match(/^If there are (\d+) or more cards without <Trigger> on your area$/i))) {

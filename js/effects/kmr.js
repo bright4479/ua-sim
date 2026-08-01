@@ -1065,4 +1065,191 @@
       log(`${unit.card.name}: การ์ดบนสุดของ Raid State ไป Outside Area`);
     },
   };
+
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const named = (u, s) => (u.card.name || '').includes(s);
+  const ownNamed = (p, s) => [...p.front, ...p.energy].filter(u => named(u, s));
+
+  async function pickOwn2(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemy2(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  const confirm = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+
+  // 2-003 Vram A La Mode Mode — [Main][When in Frontline][1 Per Turn] rest an active <Gochizo> to
+  // generate energy from the Front Line until the start of your next turn.
+  reg['EX12BT-KMR-2-003'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._vramTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const cost = [...p.front, ...p.energy].filter(u => !u.rested && named(u, 'Gochizo'));
+      if (!cost.length) { p.controller.notify?.('ต้องมี Gochizo ที่ตั้งอยู่'); return; }
+      const c = await pickOwn2(p, cost, `${unit.card.name}: เลือก Gochizo วางนอน`);
+      if (!c) return;
+      unit._vramTurn = Engine.G.turn;
+      c.rested = true;
+      unit.frontGenPersist = (unit.frontGenPersist || 0) + 1;
+      log(`${unit.card.name}: สร้าง energy จาก Front Line ได้จนถึงต้นเทิร์นหน้า`);
+    },
+    mainLabel: 'วางนอน Gochizo → สร้าง energy บน Front Line',
+  };
+
+  // 2-009 Gavv Fuwamallow Form — [Opponent's Turn] losing a battle against a character with BP 3000
+  // or less moves this character to the Energy Line rather than retiring it.
+  reg['EX12BT-KMR-2-009'] = {
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving !== unit || ctx.reason !== 'battle') return false;
+      if (Engine.G.players[Engine.G.active] === p) return false;   // [Opponent's Turn] only
+      if (p.energy.length >= 4) return false;
+      const i = p.front.indexOf(unit);
+      if (i < 0) return false;
+      p.front.splice(i, 1);
+      p.energy.push(unit);
+      log(`${unit.card.name}: ย้ายไป Energy Line แทนการถูก retire`);
+      return true;
+    },
+  };
+
+  // 2-024 OOO Tajador Combo Eternity — [On Play] return an <Ankh> from your Remove Area to your
+  // Outside Area to untap an AP card; [On Retire] pay an "OOO" card to fetch a free <Ankh>.
+  reg['EX12BT-KMR-2-024'] = {
+    async onPlay(G, p, unit) {
+      const i = p.removal.findIndex(no => /Ankh/.test(byNo(no)?.name || ''));
+      if (i < 0) return;
+      if (!await confirm(p, `${unit.card.name}: ย้าย Ankh จาก Remove Area ไป Outside Area เพื่อตั้ง AP 1 ใบ?`)) return;
+      p.sideline.push(p.removal.splice(i, 1)[0]);
+      await H.apUntap(p, 1);
+      log(`${unit.card.name}: ตั้ง AP 1 ใบ`);
+    },
+    async onSideline(G, p, unit) {
+      const i = p.sideline.findIndex(no => {
+        const c = byNo(no);
+        return c && /OOO/.test(c.name || '') && !/Ankh/.test(c.name || '');
+      });
+      if (i < 0) return;
+      if (!await confirm(p, `${unit.card.name}: ส่งการ์ด OOO 1 ใบไป Remove Area เพื่อเอา Ankh เข้ามือ?`)) return;
+      p.removal.push(p.sideline.splice(i, 1)[0]);
+      await H.fetchFromSideline(p, c => /Ankh/.test(c.name || '') && (c.need || 0) === 0,
+        `${unit.card.name}: เลือก Ankh (energy 0) เข้ามือ`);
+    },
+  };
+
+  // 2-059 "Memory Change" — [Main][Rest this card] retire an active "W" character (need <=2) to
+  // draw 1 and play a differently-named green "W" character (need <=2) from hand in active.
+  reg['EX12BT-KMR-2-059'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      const cost = [...p.front, ...p.energy].filter(u => !u.rested && named(u, 'W') && (u.card.need || 0) <= 2);
+      if (!cost.length) { p.controller.notify?.('ต้องมี character "W" (energy ≤2) ที่ตั้งอยู่'); return; }
+      const c = await pickOwn2(p, cost, `${unit.card.name}: เลือก character "W" ที่จะ retire`);
+      if (!c) return;
+      unit.rested = true;
+      const retiredName = c.card.name;
+      await Engine.sidelineUnit(p, c, 'effect');
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      const i = p.hand.findIndex(no => {
+        const cc = byNo(no);
+        return cc && cc.type === 'Character' && (cc.color || '').toLowerCase() === 'green' &&
+          /W/.test(cc.name || '') && cc.name !== retiredName && (cc.need || 0) <= 2;
+      });
+      if (i < 0) return;
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: true });
+    },
+    mainLabel: 'retire "W" → จั่ว 1 + ลง "W" ใบใหม่',
+  };
+
+  // 2-079 Den-O Wing Form — [1 Per Turn] when blocked, set this character active if you control 2+
+  // other Imagin cards / "Den-O" characters; [On Retire] play a card from its raid source rested.
+  reg['EX12BT-KMR-2-079'] = {
+    onBeingBlocked(G, p, atk) {
+      if (atk._wingTurn === Engine.G.turn) return;
+      const n = [...p.front, ...p.energy].filter(u => u !== atk &&
+        ((u.card.traits || '').includes('Imagin') || named(u, 'Den-O'))).length;
+      if (n < 2) return;
+      atk._wingTurn = Engine.G.turn;
+      atk.rested = false;
+      log(`${atk.card.name}: ตั้งขึ้น`);
+    },
+    onBeforeLeaveField(G, p, leaving, ctx, unit) {
+      if (leaving === unit) unit._raidSource = unit.under.slice();
+      return false;
+    },
+    async onSideline(G, p, unit) {
+      const src = unit._raidSource || [];
+      unit._raidSource = null;
+      const no = src.find(n => byNo(n)?.type === 'Character');
+      if (!no) return;
+      const i = p.sideline.lastIndexOf(no);
+      if (i < 0) return;
+      p.sideline.splice(i, 1);
+      p.deck.unshift(no);                                   // playCardFromZone resolves from a zone
+      await Engine.playCardFromZone(p, no, 'deck', { line: 'front', active: false });
+    },
+  };
+
+  // 2-088 Knight — [When Attacking] discard a <Final Vent> to draw 1 and gain +1500 BP this turn.
+  reg['EX12BT-KMR-2-088'] = {
+    async onAttack(G, p, unit) {
+      const i = p.hand.findIndex(no => /Final Vent/.test(byNo(no)?.name || ''));
+      if (i < 0) return;
+      if (!await confirm(p, `${unit.card.name}: ทิ้ง Final Vent เพื่อจั่ว 1 และ +1500 BP?`)) return;
+      p.sideline.push(p.hand.splice(i, 1)[0]);
+      Engine.draw(p, 1);
+      unit.bpMod += 1500;
+      log(`${unit.card.name}: จั่ว 1 ใบ และได้ +1500 BP เทิร์นนี้`);
+    },
+  };
+
+  // 2-094 Ryuki Survive — [On Play] draw 1, then optionally discard 1 to make the next Advent Card
+  // cost 1 less AP; [On Retire] rest an enemy Front Line character if a "Knight" is on your area.
+  reg['EX12BT-KMR-2-094'] = {
+    async onPlay(G, p, unit) {
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      if (!p.hand.length) return;
+      if (!await confirm(p, `${unit.card.name}: ทิ้ง 1 ใบเพื่อลด AP ของ Advent Card ใบถัดไป?`)) return;
+      await H.discardFromHand(p);
+      p.pendingDiscount = { predicate: c => (c.traits || '').includes('Advent Card'), apDelta: -1 };
+      log(`${unit.card.name}: Advent Card ใบถัดไปลด AP 1`);
+    },
+    async onSideline(G, p, unit) {
+      if (!ownNamed(p, 'Knight').length) return;
+      await H.restEnemyFront(p);
+    },
+  };
+
+  // 2-096 Dragreder — [On Play] give a "Ryuki" character [Impact (1)] during this turn.
+  reg['EX12BT-KMR-2-096'] = {
+    async onPlay(G, p, unit) {
+      const t = await pickOwn2(p, ownNamed(p, 'Ryuki'), `${unit.card.name}: เลือก character "Ryuki" รับ [Impact (1)]`);
+      if (!t) return;
+      t.tempImpact = (t.tempImpact || 0) + 1;
+      log(`${t.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 2-049 W CycloneJokerXtreme — [On Play] with 4+ differently-costed "W" characters on your area,
+  // move an enemy Front Line character to their Energy Line and nullify its effects.
+  reg['EX12BT-KMR-2-049'] = {
+    async onPlay(G, p, unit) {
+      const needs = new Set(ownNamed(p, 'W').map(u => u.card.need || 0));
+      if (needs.size < 4) return;
+      const enemy = Engine.opponentOf(p);
+      if (enemy.energy.length >= 4) return;
+      const t = await pickEnemy2(p, enemy.front, `${unit.card.name}: เลือก character ศัตรู ย้ายไป Energy Line`);
+      if (!t) return;
+      await Engine.moveUnitFree(enemy, t, 'energy');
+      t.effectsNullified = true;
+      Engine.scheduleDelayedAction(Engine.G.turn + 2, () => { t.effectsNullified = false; });
+      log(`${t.card.name}: ย้ายไป Energy Line และเสียเอฟเฟกต์จนถึงต้นเทิร์นหน้า`);
+    },
+  };
 })();

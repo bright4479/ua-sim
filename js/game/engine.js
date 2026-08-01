@@ -86,6 +86,10 @@ const Engine = (() => {
         else kw.raidTargets.push({ kind: 'name', value });
       }
     }
+    // a third form names the target in quotes instead of angle brackets: [Raid] Characters with
+    // "Gavv" in their name. Eleven cards use it and could not raid onto anything at all.
+    for (const m of fx.matchAll(/\[Raid\]\s*Characters? with "([^"]+)" in (?:their|its) name/gi))
+      kw.raidTargets.push({ kind: 'name', value: m[1].trim() });
     // wording variants: "Play this field (to your area) in active." / "Play this site set to
     // active." / "Play this character set to active."
     if (/Play this (?:field|site|character|card) (?:to your area )?(?:in an? active(?: state)?|set to active|as active|and set (?:it|this character) to active)/i.test(fx)) kw.entersActive = true;
