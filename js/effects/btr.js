@@ -405,4 +405,288 @@
   // 109 "Oh Yeah!! Manly Man Dinner!!" — choose 1 character on your area, +2000 BP this turn. If
   // there is a Roboco on your area, untap 1 AP.
   reg['BTR-1-109'] = { async onEvent(G, p, card) { await H.buffOwnCharacter(p, 2000); if (H.hasCardNamed(p, 'Roboco')) await H.apUntap(p, 1); } };
+  // ─── residual pass ───────────────────────────────────────────────────────────
+
+  const confirmB = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnB(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyB(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  const myTurnB = p => Engine.G.players[Engine.G.active] === p;
+
+  // Both players reveal their top card and bury it; returns the two required-energy values.
+  // Shared by 1-015 and 1-022.
+  function dualRevealToBottom(p, unit) {
+    const enemy = Engine.opponentOf(p);
+    const mine = p.deck.length ? p.deck.shift() : null;
+    const theirs = enemy.deck.length ? enemy.deck.shift() : null;
+    if (mine) p.deck.push(mine);
+    if (theirs) enemy.deck.push(theirs);
+    const a = mine ? (byNo(mine)?.need || 0) : -1;
+    const b = theirs ? (byNo(theirs)?.need || 0) : -1;
+    log(`${unit.card.name}: เปิดการ์ดบนสุด — คุณ ${byNo(mine)?.name || '-'} (${a}) vs ศัตรู ${byNo(theirs)?.name || '-'} (${b})`);
+    return { mine: a, theirs: b };
+  }
+
+  // 1-008 Bondo — [When Attacking] with 4+ differently-named characters on your Front Line, rest an
+  // enemy Front Line character.
+  reg['BTR-1-008'] = {
+    async onAttack(G, p, unit) {
+      const names = new Set(p.front.map(u => u.card.name));
+      if (names.size < 4) return;
+      await H.restEnemyFront(p);
+    },
+  };
+
+  // 1-015 Madoka-Chuwan — [When Attacking] the reveal duel: win or tie draws 1 and gives +1000 BP,
+  // losing costs 1000 BP.
+  reg['BTR-1-015'] = {
+    onAttack(G, p, unit) {
+      const r = dualRevealToBottom(p, unit);
+      if (r.mine >= r.theirs) {
+        Engine.draw(p, 1);
+        unit.bpMod += 1000;
+        log(`${unit.card.name}: ชนะการเปิด → จั่ว 1 ใบ และ +1000 BP เทิร์นนี้`);
+      } else {
+        unit.bpMod -= 1000;
+        log(`${unit.card.name}: แพ้การเปิด → -1000 BP เทิร์นนี้`);
+      }
+    },
+  };
+
+  // 1-022 Roboco — same reveal, but the payoff is unconditional [Impact (1)].
+  reg['BTR-1-022'] = {
+    onAttack(G, p, unit) {
+      dualRevealToBottom(p, unit);
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 1-034 Custom Meico — [On Play] bounce a cheap character of yours to discount the next cheap
+  // character you play.
+  reg['BTR-1-034'] = {
+    async onPlay(G, p, unit) {
+      const targets = [...p.front, ...p.energy].filter(u => u !== unit && (u.card.need || 0) <= 3);
+      if (!targets.length) return;
+      const t = await pickOwnB(p, targets, `${unit.card.name}: คืน character (energy ≤3) เข้ามือ?`);
+      if (!t) return;
+      await Engine.returnUnitToHand(p, t);
+      p.pendingDiscount = { predicate: c => c.type === 'Character' && (c.need || 0) <= 3, apDelta: -1 };
+      log(`${unit.card.name}: character (energy ≤3) ใบถัดไปลด AP 1`);
+    },
+  };
+
+  // 1-038 Bondo — [On Play] bounce an enemy with BP up to 1000 per Event card in your Outside Area.
+  reg['BTR-1-038'] = {
+    async onPlay(G, p, unit) {
+      const events = p.sideline.filter(no => byNo(no)?.type === 'Event').length;
+      if (events > 0) await H.bounceEnemyFront(p, events * 1000);
+      unit.tempImpact = (unit.tempImpact || 0) + 1;
+      log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+  };
+
+  // 1-053 Motsuo — [On Play] pick one of two effects.
+  reg['BTR-1-053'] = {
+    async onPlay(G, p, unit) {
+      const opts = [];
+      if (p.hand.length >= 5) opts.push({ label: 'retire ศัตรู (BP ≤3000)', value: 'retire' });
+      opts.push({ label: 'จั่ว 1 ใบ', value: 'draw' });
+      const pick = await p.controller.chooseOption(p, `${unit.card.name}: เลือกผล`, opts);
+      if (pick === 'retire') { await H.retireEnemyFront(p, 3000); return; }
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 1-069 — [On Play] retire a weak enemy on the Energy Line.
+  reg['BTR-1-069'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      const targets = enemy.energy.filter(u => u.card.type === 'Character' &&
+        (u.card.gen || 0) <= 1 && (u.card.ap || 0) === 1);
+      const t = await pickEnemyB(p, targets, `${unit.card.name}: เลือก character ศัตรูบน Energy Line`);
+      if (t) await Engine.sidelineUnit(enemy, t, 'effect');
+    },
+  };
+
+  // 1-073 Serizawa Gaku — [On Play] discount the next Animal card; [Main][When in Frontline]
+  // [1 Per Turn] draw 1 if you played an Animal card this turn.
+  reg['BTR-1-073'] = {
+    onPlay(G, p, unit) {
+      p.pendingDiscount = { predicate: c => (c.traits || '').includes('Animal'), apDelta: -1 };
+      log(`${unit.card.name}: Animal ใบถัดไปลด AP 1`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._gakuTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const played = [...(p._playedTraitsThisTurn || [])].some(t => t.includes('animal'));
+      if (!played) { p.controller.notify?.('ต้องเล่นการ์ด Animal ในเทิร์นนี้ก่อน'); return; }
+      unit._gakuTurn = Engine.G.turn;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+    mainLabel: 'จั่ว 1 ใบ (เล่น Animal แล้ว)',
+  };
+
+  // 1-074 Bondo — [Main][Pay 1 AP][1 Per Turn] +1000 BP until the start of your next turn.
+  reg['BTR-1-074'] = {
+    async onMain(G, p, unit) {
+      if (unit._bondoTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!Engine.payApForEffect(p, 1)) { p.controller.notify?.('AP ไม่พอ'); return; }
+      unit._bondoTurn = Engine.G.turn;
+      unit.bpPersist += 1000;
+      log(`${unit.card.name}: ได้ +1000 BP จนถึงต้นเทิร์นหน้า`);
+    },
+    mainLabel: 'จ่าย 1 AP → +1000 BP',
+  };
+
+  // 1-076 Motsuo — +1000 BP while any of your characters carries [Impact] or [Damage].
+  reg['BTR-1-076'] = {
+    bpBonus(p, unit) {
+      // kw.dmg defaults to 1 on every character (the normal damage a hit deals), so only a value
+      // above 1 means the card actually carries [Damage (N)]
+      const armed = [...p.front, ...p.energy].some(u =>
+        (u.kw?.impact || 0) > 0 || (u.kw?.dmg || 0) > 1 || (u.tempImpact || 0) > 0 || (u.tempDmg || 0) > 0);
+      return armed ? 1000 : 0;
+    },
+  };
+
+  // 1-077 Roboco — [When Attacking] rest any number of active Animal cards for a tiered payoff.
+  reg['BTR-1-077'] = {
+    async onAttack(G, p, unit) {
+      const pool = [...p.front, ...p.energy].filter(u => u !== unit && !u.rested && (u.card.traits || '').includes('Animal'));
+      if (!pool.length) return;
+      let n = 0;
+      for (const u of pool) {
+        if (!await confirmB(p, `${unit.card.name}: วางนอน ${u.card.name}?`)) break;
+        u.rested = true;
+        n++;
+      }
+      if (!n) return;
+      unit.bpMod += 500 * n;
+      if (n >= 3) unit.tempImpact = (unit.tempImpact || 0) + 1;
+      if (n >= 4) unit.tempDmg = (unit.tempDmg || 0) + 1;
+      log(`${unit.card.name}: วางนอน Animal ${n} ใบ → +${500 * n} BP${n >= 3 ? ' · [Impact (1)]' : ''}${n >= 4 ? ' · [Damage (2)]' : ''}`);
+    },
+  };
+
+  // 1-081 Gachi Gorilla — [On Play] fetch a cheap green ally from your Outside Area, either to hand
+  // or straight onto the field rested. ("or raid it" is not offered.)
+  reg['BTR-1-081'] = {
+    async onPlay(G, p, unit) {
+      const fits = c => c && c.type === 'Character' && (c.color || '').toLowerCase() === 'green' &&
+        (c.ap || 0) === 1 && !/Gachi Gorilla/.test(c.name || '') &&
+        ((c.traits || '').includes("Gachi's House") || /Bondo|Motsuo/.test(c.name || ''));
+      const i = p.sideline.findIndex(no => fits(byNo(no)));
+      if (i < 0) return;
+      const how = await p.controller.chooseOption(p, `${unit.card.name}: ${byNo(p.sideline[i])?.name}`,
+        [{ label: 'เข้ามือ', value: 'hand' }, { label: 'ลงสนามแบบนอน', value: 'field' }, { label: 'ข้าม', value: null }]);
+      if (!how) return;
+      if (how === 'hand') {
+        p.hand.push(p.sideline.splice(i, 1)[0]);
+        log(`${unit.card.name}: เพิ่มการ์ดเข้ามือ`);
+        return;
+      }
+      await Engine.playCardFromZone(p, p.sideline[i], 'sideline', { line: 'front', active: false });
+    },
+  };
+
+  // 1-088 Ruri — +500 BP with a <Gachi Gorilla> out; [On Retire] dig 3 for a Gachi's House card.
+  reg['BTR-1-088'] = {
+    bpBonus(p, unit) { return myTurnB(p) && H.hasCardNamed(p, 'Gachi Gorilla') ? 500 : 0; },
+    async onSideline(G, p, unit) {
+      const revealed = p.deck.splice(0, 3);
+      if (!revealed.length) return;
+      const picked = await p.controller.chooseRevealPick(p, revealed, `${unit.card.name}: เลือก Gachi's House เข้ามือ`,
+        c => (c.traits || '').includes("Gachi's House"), 1);
+      const chosen = picked?.length ? revealed[picked[0]] : null;
+      if (chosen) {
+        revealed.splice(revealed.indexOf(chosen), 1);
+        p.hand.push(chosen);
+        log(`${unit.card.name}: เพิ่ม ${byNo(chosen)?.name} เข้ามือ`);
+      }
+      for (const no of revealed) p.deck.push(no);
+    },
+  };
+
+  // 1-101 Bondo — [On Play] +1000 BP this turn to any number of differently-named Front Line characters.
+  reg['BTR-1-101'] = {
+    async onPlay(G, p, unit) {
+      const seen = new Set();
+      for (const u of [...p.front]) {
+        if (seen.has(u.card.name)) continue;
+        if (!await confirmB(p, `${unit.card.name}: ให้ ${u.card.name} +1000 BP?`)) continue;
+        seen.add(u.card.name);
+        u.bpMod += 1000;
+        log(`${u.card.name}: ได้ +1000 BP เทิร์นนี้`);
+      }
+    },
+  };
+
+  // 1-106 Roboco — [On Play] fetch a <Trait: Food> card from your Outside Area.
+  reg['BTR-1-106'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => (c.traits || '').includes('Food'), `${unit.card.name}: เลือก Food เข้ามือ`);
+    },
+  };
+
+  // P-001 Roboco — [On Play][When Attacking] mark an enemy to retire at the end of the Attack Phase.
+  const markForRetire = async (p, unit) => {
+    const t = await pickEnemyB(p, Engine.opponentOf(p).front, `${unit.card.name}: เลือก character ศัตรู (retire ตอนจบ Attack Phase)`);
+    if (!t) return;
+    t.retireAtEndOfTurn = true;
+    log(`${t.card.name}: จะถูก retire ตอนจบ Attack Phase`);
+  };
+  reg['UAPR-BTR-P-001'] = {
+    async onPlay(G, p, unit) { await markForRetire(p, unit); },
+    async onAttack(G, p, unit) { await markForRetire(p, unit); },
+  };
+
+  // P-002 Roboco — [On Play] pitch 2 to bury an enemy Front Line character in their deck.
+  reg['UAPR-BTR-P-002'] = {
+    async onPlay(G, p, unit) {
+      const enemy = Engine.opponentOf(p);
+      if (p.hand.length < 2 || !enemy.front.length) return;
+      if (!await confirmB(p, `${unit.card.name}: ทิ้ง 2 ใบเพื่อส่ง character ศัตรูลงใต้เด็ค?`)) return;
+      await H.discardFromHand(p);
+      await H.discardFromHand(p);
+      const t = await pickEnemyB(p, enemy.front, `${unit.card.name}: เลือก character ศัตรูลงใต้เด็ค`);
+      if (!t) return;
+      enemy.front.splice(enemy.front.indexOf(t), 1);
+      enemy.deck.push(t.no);
+      log(`${t.card.name}: ลงไปอยู่ใต้สุดของเด็คเจ้าของ`);
+    },
+  };
+
+  // P-003 Roboco — [On Play] draw 1 with 4+ Event cards in your Outside Area.
+  reg['UAPR-BTR-P-003'] = {
+    onPlay(G, p, unit) {
+      if (p.sideline.filter(no => byNo(no)?.type === 'Event').length < 4) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // P-004 Roboco — [Main][1 Per Turn] only on the turn it was played: give another character
+  // [Impact (1)] this turn.
+  reg['UAPR-BTR-P-004'] = {
+    async onMain(G, p, unit) {
+      if (unit.enteredTurn !== Engine.G.turn) { p.controller.notify?.('ใช้ได้เฉพาะเทิร์นที่เล่นการ์ดนี้'); return; }
+      if (unit._robTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const t = await pickOwnB(p, [...p.front, ...p.energy].filter(u => u !== unit), `${unit.card.name}: เลือก character รับ [Impact (1)]`);
+      if (!t) return;
+      unit._robTurn = Engine.G.turn;
+      t.tempImpact = (t.tempImpact || 0) + 1;
+      log(`${t.card.name}: ได้ [Impact (1)] เทิร์นนี้`);
+    },
+    mainLabel: 'ให้ character อื่น [Impact (1)]',
+  };
 })();

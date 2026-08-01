@@ -222,7 +222,7 @@
     apActive: /^Choose up to (\d+) (?:of your? )?AP [Cc]ards? and (?:(?:set|switch) (?:it|them) to active|activate (?:it|them)|active (?:it|them))\.?$/i,
     onplayBuffOther: /^\[On Play\]\s*(?:Choose (?:up to )?1|1 of your)\s+(other )?[Cc]haracters?(?: with <[^>]+>)?(?: on your (?:area|field))?[.,]?\s*(?:and )?\s*(?:then\s*)?(?:(?:it (?:gets|gains)|give it)\s*)?\+(\d+) ?BP(?: during this turn)?\.?$/i,
     onplayDebuffEnemy: /^\[On Play\]\s*Choose (?:up to )?1 character on your opponent'?s Front Line[.,]?\s*(?:it (?:gets|gains)|give it) -(\d+) ?BP during this turn\.?$/i,
-    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s (?:Front|Energy) Line(?: with BP (\d+) or less)? and rest it\.?(\s*The (?:next time it would set to active it doesn'?t|chosen character does not set to active the next time it would)\.?)?$/i,
+    onplayRestEnemy: /^\[On Play\]\s*Choose up to 1 character on your opponent'?s (?:Front|Energy) Line(?: with BP (\d+) or less)? and rest it\.?(\s*(?:The )?(?:next time it would (?:set|switch) to active it doesn'?t|chosen character does not set to active the next time it would)\.?)?$/i,
     bounceSelfOrOther: /^(?:\[On Play\]\s*)?Return 1 (?:other )?character(?:\s+on your area|\s+from your field)? with\s+(?:required\s+energy\s+of\s+(\d+)(?:\s+or less)|a\s+cost\s+of\s+(\d+)\s+or less\s+energy|(\d+)\s+energy\s+required\s+or less) to your hand\.\s*If you (?:cannot|can'?t), return this (?:character|card) to your hand(?: instead)?\.?$/i,
     onRetireDraw: /^\[On Retire\]\s*Draw (\d+)(?: cards?)?\.?$/i,
     // "other"/"another" is optional — several cards let the buff land on this character itself
@@ -1320,7 +1320,7 @@
   // so the tiers ride on those evaluators instead of needing a third one. ~45 cards use this shape.
   // OPM words the head differently ("all abilities listed below if you have the required number of
   // other <Trait:Hero> cards on your field"), so both openings feed the same base parser
-  const RX_TIER_HEAD = /gains (?:all )?(?:(?:the following )?effects? based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
+  const RX_TIER_HEAD = /(?:gains|[Aa]ctivate) (?:all )?(?:(?:the following )?effects? based on (?:the )?(?:number of |different types of )?|(?:abilities listed below|effects? below) if you have the required number of )(.*?)[.:]?\s*$/i;
   // the bullet marker is frequently missing in the data, and the threshold is written with an
   // optional "BP " prefix and an optional trailing noun ("4 or more cards:")
   const RX_TIER_BULLET = /^[•·・*-]?\s*(?:BP\s*)?(\d+)\s*(?:or\s*(more|less|higher|lower))?\s*(?:cards?|characters?)?\s*:\s*(.*)$/i;
@@ -1364,6 +1364,7 @@
         return distinct ? new Set(hits.map(u => u.card.name)).size : hits.length;
       };
     }
+    if (/^cards? in your hand$/i.test(text)) return owner => owner.hand.length;
     if (/^face-down cards? under this character$/i.test(text)) return (owner, unit) => (unit.counters || []).length;
     if (/^(?:this character'?s|its) BP$/i.test(text)) return (owner, unit) => Engine.bp(unit);
     if (/^your generated energy$/i.test(text)) return owner => Engine.energyGen(owner)?.total ?? 0;

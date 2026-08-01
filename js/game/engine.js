@@ -30,11 +30,18 @@ const Engine = (() => {
     // cards on your area, this character gains [Impact 1]") is not a printed keyword either — it is
     // evaluated live by the generic impact/damage evaluator in common.js. Without this the card
     // would carry the keyword unconditionally AND gain it again whenever the condition held.
+    // the keyword may trail a BP bonus ("gains +1000 BP and [Impact Negate]"), which the older
+    // pattern missed — those cards were carrying the keyword unconditionally
     const isConditionalGrant = s =>
-      /^\s*(?:\[[^\]]*\]\s*)*(?:If|While)\b[^@]*\bthis character (?:gains?|gets)\s*[+\d]*\s*\[/i.test(s);
+      /^\s*(?:\[[^\]]*\]\s*)*(?:If|While)\b[^@]*\bthis character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:\s*,|\s+and)?\s*)?[+\d]*\s*\[/i.test(s);
+    // A keyword named inside the CONDITION half of a clause ("If there is a character on your area
+    // with [Impact] ... , this character gets +1000 BP") is being referred to, not granted. Drop
+    // that half before scanning, or the card hands itself the keyword it was only asking about.
+    const stripConditionRefs = s =>
+      s.replace(/\b(?:If|While)\b[^,]*?\bwith \[[^\]]+\](?:\s*(?:or|and)\s*\[[^\]]+\])*\s*,/gi, ' ');
     const fxPassive = fxSegs
       .filter(s => !/^\s*-?\d*\s*\[Main\]/i.test(s) && !isConditionalGrant(s))
-      .map(stripQuotes).join('@');
+      .map(s => stripConditionRefs(stripQuotes(s))).join('@');
     const kw = {
       step: /\[Step\]/i.test(fxPassive),
       // the source data spells this keyword "[Sniper]" on 113 cards and "[Snipe]" on only 4 —
@@ -386,7 +393,7 @@ const Engine = (() => {
     }
     m = fx.match(/If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by (\d+)/i);
     if (m && p.front.length === 0 && p.energy.length === 0) delta -= parseInt(m[1]);
-    m = fx.match(/If there is an? \[?(\w+)\]?(?: or (?:an? )?\[?(\w+)\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
+    m = fx.match(/If there is an? \[?(\w+)\]?(?:\s*or\s*(?:an? )?\[?(\w+)\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by (\d+)|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by (\d+)|in your hand, this card'?s energy requirement is reduced by (\d+))/i);
     if (m) {
       const enemy = opponentOf(p);
       const colors = [m[1], m[2]].filter(Boolean).map(s => s.toLowerCase());
@@ -482,7 +489,7 @@ const Engine = (() => {
     const fx = card.effect || '';
     return /Reduce the required energy of this card in your hand(?: and Outside Area)? by \d+/i.test(fx) ||
       /If there (?:is|are) no cards? on your area, reduce the energy requirement of this card in your hand by \d+/i.test(fx) ||
-      /If there is an? \[?\w+\]?(?: or (?:an? )?\[?\w+\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
+      /If there is an? \[?\w+\]?(?:\s*or\s*(?:an? )?\[?\w+\]?)?\s*[Cc]ard on your opponent'?s area,?\s*(?:in your hand,?\s*)?(?:reduce this card'?s required energy in your hand by \d+|reduce (?:the|this card'?s) energy requirement (?:of this card )?in your hand by \d+|in your hand, this card'?s energy requirement is reduced by \d+)/i.test(fx) ||
       /If there is an? \[?\w+\]? (?:or (?:an? )?\[?\w+\]? )?[Cc]ard on your opponent'?s (?:area|field), reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /^(?:\d+\s*)?Reduce this card'?s required energy by \d+\s*(?:\[\w+\])?\s*while in your hand/i.test(fx) ||
       /If there are \d+ or less cards on your Outside Area, this card'?s energy requirement is reduced by \d+/i.test(fx) ||
