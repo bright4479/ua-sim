@@ -1069,4 +1069,181 @@
       log(`${unit.card.name}: Remove Area ≥6 ใบ → จั่ว 1 ใบ`);
     },
   };
+  // ─── residual pass 2 ─────────────────────────────────────────────────────────
+
+  const confirmN = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnN(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  async function pickEnemyN(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseEnemyCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  // distinct <Trait: Goddess> names on your area, excluding a given unit — the NIK-2 theme
+  function goddessNames(p, exclude) {
+    const names = new Set();
+    for (const u of [...p.front, ...p.energy]) {
+      if (u === exclude) continue;
+      if ((u.card.traits || '').includes('Goddess')) names.add(u.card.name);
+    }
+    return names.size;
+  }
+
+  // 1-019 Modernia — [On Play] fetch every <Memory>; [When Attacking] retire an enemy whose BP cap
+  // rises by 1000 for each Event card pitched from hand.
+  reg['NIK-1-019'] = {
+    async onPlay(G, p, unit) {
+      let n = 0;
+      for (let i = p.sideline.length - 1; i >= 0; i--) {
+        if (!/Memory/.test(byNo(p.sideline[i])?.name || '')) continue;
+        p.hand.push(p.sideline.splice(i, 1)[0]);
+        n++;
+      }
+      if (n) log(`${unit.card.name}: เพิ่ม Memory ${n} ใบเข้ามือ`);
+    },
+    async onAttack(G, p, unit) {
+      const events = p.hand.filter(no => byNo(no)?.type === 'Event').length;
+      const opts = [];
+      for (let k = events; k >= 1; k--) opts.push({ label: `ทิ้ง Event ${k} ใบ (retire BP ≤${1000 + k * 1000})`, value: k });
+      opts.push({ label: `ไม่ทิ้ง (retire BP ≤1000)`, value: 0 });
+      const k = await p.controller.chooseOption(p, `${unit.card.name}: ทิ้ง Event กี่ใบ?`, opts);
+      for (let i = 0; i < k; i++) {
+        const idx = p.hand.findIndex(no => byNo(no)?.type === 'Event');
+        if (idx < 0) break;
+        p.sideline.push(p.hand.splice(idx, 1)[0]);
+      }
+      if (k) log(`${unit.card.name}: ทิ้ง Event ${k} ใบไป Outside Area`);
+      await H.retireEnemyFront(p, 1000 + k * 1000);
+    },
+  };
+
+  // 1-043 Dorothy — [On Play] with 4+ non-Trigger cards of your own, retire an enemy whose BP is at
+  // most 1000 per Trigger card on THEIR area.
+  reg['NIK-1-043'] = {
+    async onPlay(G, p, unit) {
+      if (H.countNoTrigger(p) < 4) return;
+      const enemy = Engine.opponentOf(p);
+      const cap = [...enemy.front, ...enemy.energy].filter(u => u.card.trigger).length * 1000;
+      if (cap <= 0) return;
+      await H.retireEnemyFront(p, cap);
+    },
+  };
+
+  // 1-052 Guren — [Main][1 Per Turn] pitch up to 3 cards for a tier of bonuses this turn. The tier
+  // counts cards pitched by THIS activation, so it cannot ride the generic board-state evaluator.
+  reg['NIK-1-052'] = {
+    async onMain(G, p, unit) {
+      if (unit._gurenTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!p.hand.length) { p.controller.notify?.('มือว่าง'); return; }
+      let n = 0;
+      for (let k = 0; k < 3 && p.hand.length; k++) {
+        if (!await confirmN(p, `${unit.card.name}: ทิ้งการ์ดใบที่ ${k + 1} ไป Outside Area?`)) break;
+        await H.discardFromHand(p);
+        n++;
+      }
+      if (!n) return;
+      unit._gurenTurn = Engine.G.turn;
+      if (n >= 1) unit._grantedAttackDraw = true;
+      if (n >= 2) unit.bpMod += 1000;
+      if (n >= 3) unit.tempDoubleAttack = true;
+      log(`${unit.card.name}: ทิ้ง ${n} ใบ → ${n >= 1 ? '[When Attacking] จั่ว 1' : ''}${n >= 2 ? ' · +1000 BP' : ''}${n >= 3 ? ' · [Double Attack]' : ''}`);
+    },
+    mainLabel: 'ทิ้งการ์ดเพื่อรับโบนัสเป็นขั้น',
+  };
+
+  // 1-113 Centi — [When Attacking] with BP 4000 or more, shield a Front Line character from Trigger
+  // effects this turn. (Targeting immunity is all-or-nothing here.)
+  reg['NIK-1-113'] = {
+    async onAttack(G, p, unit) {
+      if (Engine.bp(unit) < 4000) return;
+      const t = await pickOwnN(p, p.front, `${unit.card.name}: เลือก character ป้องกันจาก Trigger`);
+      if (!t) return;
+      t.tempUntargetable = true;
+      log(`${t.card.name}: ไม่ถูกเลือกโดยเอฟเฟกต์ฝ่ายตรงข้าม เทิร์นนี้`);
+    },
+  };
+
+  // 2-001 Abe — [Main][Rest this card] with 10+ cards in your Remove Area, remove itself to draw 1
+  // and discount the next expensive <Cinderella>.
+  reg['PC02BT-NIK-2-001'] = {
+    async onMain(G, p, unit) {
+      if (unit.rested) { p.controller.notify?.('การ์ดนอนอยู่'); return; }
+      if (p.removal.length < 10) { p.controller.notify?.('ต้องมี 10 ใบใน Remove Area'); return; }
+      const line = p.front.includes(unit) ? p.front : p.energy;
+      const i = line.indexOf(unit);
+      if (i < 0) return;
+      line.splice(i, 1);
+      p.removal.push(unit.no);
+      Engine.draw(p, 1);
+      p.pendingDiscount = { predicate: c => /Cinderella/.test(c.name || '') && (c.need || 0) >= 10, needDelta: -6 };
+      log(`${unit.card.name}: ไป Remove Area, จั่ว 1 ใบ · Cinderella ใบถัดไปลด energy 6`);
+    },
+    mainLabel: 'ไป Remove Area → จั่ว 1 + ลด energy Cinderella',
+  };
+
+  // 2-015 Cinderella — [On Play][1 Per Turn] retire an enemy Front Line character.
+  reg['PC02BT-NIK-2-015'] = {
+    async onPlay(G, p, unit) {
+      if (unit._cindTurn === Engine.G.turn) return;
+      unit._cindTurn = Engine.G.turn;
+      await H.retireEnemyFront(p);
+    },
+  };
+
+  // 2-025 Guren: Black Shadow — [On Play][1 Per Turn] set itself active with 3+ differently-named
+  // Goddess characters elsewhere on your area.
+  reg['PC02BT-NIK-2-025'] = {
+    onPlay(G, p, unit) {
+      if (unit._gbsTurn === Engine.G.turn) return;
+      if (goddessNames(p, unit) < 3) return;
+      unit._gbsTurn = Engine.G.turn;
+      unit.rested = false;
+      log(`${unit.card.name}: ตั้งขึ้น`);
+    },
+  };
+
+  // 2-028 Snow White: Innocent Days — [Main][When in Frontline][1 Per Turn] buff a Goddess;
+  // [When Attacking] draw 1 with a <Red Hood> out.
+  reg['PC02BT-NIK-2-028'] = {
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._swTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      const t = await pickOwnN(p, [...p.front, ...p.energy].filter(u => (u.card.traits || '').includes('Goddess')),
+        `${unit.card.name}: เลือก Goddess รับ +1000 BP`);
+      if (!t) return;
+      unit._swTurn = Engine.G.turn;
+      t.bpMod += 1000;
+      log(`${t.card.name}: ได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'Goddess +1000 BP',
+    onAttack(G, p, unit) {
+      if (!H.hasCardNamed(p, 'Red Hood')) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+    },
+  };
+
+  // 2-030 Rapunzel: Pure Grace — [When Attacking] with 3+ differently-named Goddess characters,
+  // draw 1 then pitch 1.
+  reg['PC02BT-NIK-2-030'] = {
+    async onAttack(G, p, unit) {
+      if (goddessNames(p, unit) < 3) return;
+      if (!await confirmN(p, `${unit.card.name}: จั่ว 1 แล้วทิ้ง 1?`)) return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      await H.discardFromHand(p);
+    },
+  };
+
+  // 2-031 Rapunzel: Pure Grace — [On Play] fetch a cheap Goddess card from your Outside Area.
+  reg['PC02BT-NIK-2-031'] = {
+    async onPlay(G, p, unit) {
+      await H.fetchFromSideline(p, c => (c.traits || '').includes('Goddess') && (c.need || 0) <= 3 &&
+        (c.ap || 0) === 1 && !/Rapunzel: Pure Grace/.test(c.name || ''),
+        `${unit.card.name}: เลือก Goddess (energy ≤3) เข้ามือ`);
+    },
+  };
 })();
