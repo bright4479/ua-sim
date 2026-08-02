@@ -1061,6 +1061,12 @@
         rules.push({ when, cond: { lifeToHand: true }, amount: parseInt(m[1]) });
         continue;
       }
+      // "If there is a character with "Eren" in its name and a character with "Zeke" in its name on
+      // your area, this character gets +1500 BP."
+      if ((m = rest.match(/^If there is a character with "([^"]+)" in its name and a character with "([^"]+)" in its name on your (?:area|field|Front Line), this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
+        rules.push({ when, cond: { allNames: [m[1].trim(), m[2].trim()], zone: 'field' }, amount: parseInt(m[3]) });
+        continue;
+      }
       // "If there is a face-down card under this character, this character gets +N BP."
       if ((m = rest.match(/^If there is a face-down card under this character, this character (?:gets|gains) \+?(\d+) ?BP.*$/i))) {
         rules.push({ when, cond: { faceDown: 1 }, amount: parseInt(m[1]) });
@@ -1247,6 +1253,19 @@
     if ((m = text.match(/^If there(?: are)? (\d+) or more cards? in your (Outside Area|Remove Area)$/i))) {
       const need = parseInt(m[1]), zone = /remove/i.test(m[2]) ? 'removal' : 'sideline';
       return owner => owner[zone].length >= need;
+    }
+    // "If there is a character with "Eren" in its name and a character with "Zeke" in its name on
+    // your area" — both must be present at once (5 cards)
+    if ((m = text.match(/^If there is a character with "([^"]+)" in its name and a character with "([^"]+)" in its name on your (?:area|field|Front Line)$/i))) {
+      const names = [m[1].trim(), m[2].trim()];
+      return (owner, unit) => names.every(n => countMatching(owner, unit, { name: n }) >= 1);
+    }
+    // "N or more Yellow Character Cards with different names without <Trait: Rumbling> on your area"
+    if ((m = text.match(/^If there are (\d+) or more (\w+) [Cc]haracter [Cc]ards? with different names without <Trait:?\s*([^>]+)> on your area$/i))) {
+      const need = parseInt(m[1]), color = m[2].toLowerCase(), trait = m[3].trim().toLowerCase();
+      return owner => new Set([...owner.front, ...owner.energy]
+        .filter(u => (u.card.color || '').toLowerCase() === color && !traitMatches(u.card.traits, trait))
+        .map(u => u.card.name)).size >= need;
     }
     // quoted-name forms, used throughout the Kamen Rider sets
     if ((m = text.match(/^If there is a character with "([^"]+)"(?: or "([^"]+)")? in (?:its|their) name on your (?:area|field|Front Line)$/i))) {
@@ -1450,7 +1469,7 @@
       // that costed or multi-step abilities (which resolve elsewhere) are not swept up here.
       // the grant may be compound ("gains +500 BP and [Impact (1)]"); the BP half is handled
       // separately by the passive-BP evaluator, so only the keyword is taken here
-      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]\d]*(\d*)[^\]]*\]\.?$/i);
+      m = rest.match(/^(.+?),\s*this character (?:gains?|gets)\s*(?:[+-]?\d+ ?BP(?:,|\s+and)?\s*)?(?:["\u201c][^"\u201d]*["\u201d](?:\s*,|\s+and)?\s*)?\[(Impact Negate|Impact Nagate|Nullify Impact|Impact|Damage|Sniper?|Double Attack|Double Block)[^\]\d]*(\d*)[^\]]*\]\.?$/i);
       if (!m) continue;
       const cond = parseKeywordCondition(m[1].trim());
       if (!cond) continue;
