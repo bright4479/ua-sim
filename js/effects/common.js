@@ -280,7 +280,17 @@
   // with the given marker. Returned clause is normalized.
   function findClause(fx, markerRegex) {
     const segs = (fx || '').split('@').map(s => normalizeFx(s.trim()));
-    return segs.find(s => markerRegex.test(s)) || null;
+    const hit = segs.find(s => markerRegex.test(s));
+    if (!hit) return null;
+    // 13 cards tag one clause with BOTH timings ("[On Play] [When Attacking] Play up to 1 ..."),
+    // meaning it fires on either. Drop whichever tag the caller did not ask for, so the body
+    // matchers see a clause with a single leading marker as they expect.
+    const both = hit.match(/^\s*\[On Play\]\s*\[When Attacking\]\s*/i);
+    if (both) {
+      const keep = /When Attacking/i.test(markerRegex.source) ? '[When Attacking] ' : '[On Play] ';
+      return keep + hit.slice(both[0].length);
+    }
+    return hit;
   }
   // same idea, but returns the regex match result from whichever segment matches (for patterns
   // without a fixed bracket-marker prefix, like the AP-untap event text).

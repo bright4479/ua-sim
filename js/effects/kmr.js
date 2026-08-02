@@ -1252,4 +1252,190 @@
       log(`${t.card.name}: ย้ายไป Energy Line และเสียเอฟเฟกต์จนถึงต้นเทิร์นหน้า`);
     },
   };
+  // ─── residual pass 2 ─────────────────────────────────────────────────────────
+
+  const myTurnR = p => Engine.G.players[Engine.G.active] === p;
+  const confirmR2 = (p, q) => p.controller.chooseOption(p, q, [{ label: 'ตกลง', value: true }, { label: 'ข้าม', value: false }]);
+  async function pickOwnR2(p, list, title) {
+    if (!list.length) return null;
+    const uid = await p.controller.chooseOwnCharacter(p, list, title, true);
+    return list.find(u => u.uid === uid) || null;
+  }
+  const nameHasR = (u, s) => (u.card.name || '').includes(s);
+
+  // free-play a card matching `fits` from hand, else from the Outside Area; returns where it came
+  // from so the caller can apply a hand-only bonus
+  async function playFromHandOrOutside(p, fits, opts) {
+    const hi = p.hand.findIndex(no => fits(byNo(no)));
+    if (hi >= 0) { await Engine.playCardFromZone(p, p.hand[hi], 'hand', opts); return 'hand'; }
+    const si = p.sideline.findIndex(no => fits(byNo(no)));
+    if (si >= 0) { await Engine.playCardFromZone(p, p.sideline[si], 'sideline', opts); return 'sideline'; }
+    return null;
+  }
+
+  // 2-012 Gavv Master Mode — [On Play][When Attacking] free-play a <Gochizo> to your Energy Line
+  // rested; +1000 BP and [Impact 1] on the turn an effect put this character into play.
+  const gavvPlayGochizo = async (p, unit) => {
+    if (p.energy.length >= 4) return;
+    const i = p.hand.findIndex(no => /Gochizo/.test(byNo(no)?.name || ''));
+    if (i < 0) return;
+    await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'energy', active: false });
+  };
+  reg['EX12BT-KMR-2-012'] = {
+    async onPlay(G, p, unit) {
+      if (unit._playedByEffect) {
+        unit.bpMod += 1000;
+        unit.tempImpact = (unit.tempImpact || 0) + 1;
+        log(`${unit.card.name}: ถูกเล่นด้วยเอฟเฟกต์ → +1000 BP และ [Impact (1)] เทิร์นนี้`);
+      }
+      await gavvPlayGochizo(p, unit);
+    },
+    async onAttack(G, p, unit) { await gavvPlayGochizo(p, unit); },
+  };
+
+  // 2-019 Zi-O Ohma Form — [On Play] fetch every cheap non-yellow [Raid] card from your Outside
+  // Area; [Main][When in Frontline][1 Per Turn] free-play one of them in active.
+  const zioFits = c => c && c.type === 'Character' && (c.color || '').toLowerCase() !== 'yellow' &&
+    (c.bp || 0) <= 4000 && /\[Raid\]/i.test(c.effect || '');
+  reg['EX12BT-KMR-2-019'] = {
+    async onPlay(G, p, unit) {
+      let n = 0;
+      for (let i = p.sideline.length - 1; i >= 0; i--) {
+        if (!zioFits(byNo(p.sideline[i]))) continue;
+        if (!await confirmR2(p, `${unit.card.name}: เอา ${byNo(p.sideline[i])?.name} เข้ามือ?`)) continue;
+        p.hand.push(p.sideline.splice(i, 1)[0]);
+        n++;
+      }
+      if (n) log(`${unit.card.name}: เพิ่ม ${n} ใบจาก Outside Area เข้ามือ`);
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._zioTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (p.front.length >= 4) { p.controller.notify?.('Front Line เต็ม'); return; }
+      const i = p.hand.findIndex(no => zioFits(byNo(no)));
+      if (i < 0) { p.controller.notify?.('ไม่มีการ์ดที่ตรงเงื่อนไขในมือ'); return; }
+      unit._zioTurn = Engine.G.turn;
+      await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: true });
+    },
+    mainLabel: 'ลงการ์ด [Raid] (BP ≤4000) แบบตั้ง',
+  };
+
+  // 1-004 Ohma Zi-O (2019) — [On Play] [Impact (1)] this turn; at the end of your Attack Phase,
+  // deal 1 damage with 8+ differently-named "Rider" characters out.
+  reg['UA29BT-KMR-1-004'] = {
+    onPlay(G, p, unit) { unit.tempImpact = (unit.tempImpact || 0) + 1; log(`${unit.card.name}: ได้ [Impact (1)] เทิร์นนี้`); },
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.front.includes(unit)) return;
+      const names = new Set([...p.front, ...p.energy].filter(u => nameHasR(u, 'Rider')).map(u => u.card.name));
+      if (names.size < 8) return;
+      await Engine.dealDamage(p, Engine.opponentOf(p), 1, unit);
+      log(`${unit.card.name}: สร้างความเสียหาย 1 ให้ฝ่ายตรงข้าม`);
+    },
+  };
+
+  // 1-005 Grand Zi-O — [On Play] deploy up to 2 differently-named cheap [Raid] cards rested, then
+  // set one Front Line character active; [Main][When in Frontline][Pay 1 AP][1 Per Turn] team buff.
+  reg['UA29BT-KMR-1-005'] = {
+    async onPlay(G, p, unit) {
+      const used = new Set();
+      for (let k = 0; k < 2; k++) {
+        if (p.front.length >= 4) break;
+        const i = p.hand.findIndex(no => { const c = byNo(no); return zioFits(c) && !used.has(c.name); });
+        if (i < 0) break;
+        used.add(byNo(p.hand[i]).name);
+        await Engine.playCardFromZone(p, p.hand[i], 'hand', { line: 'front', active: false });
+      }
+      const t = await pickOwnR2(p, p.front.filter(u => u.rested), `${unit.card.name}: เลือก character ตั้งขึ้น`);
+      if (t) { t.rested = false; log(`${t.card.name}: ตั้งขึ้น`); }
+    },
+    async onMain(G, p, unit) {
+      if (!p.front.includes(unit)) { p.controller.notify?.('ต้องอยู่บน Front Line'); return; }
+      if (unit._grandTurn === Engine.G.turn) { p.controller.notify?.('ใช้ได้เทิร์นละครั้ง'); return; }
+      if (!Engine.payApForEffect(p, 1)) { p.controller.notify?.('AP ไม่พอ'); return; }
+      unit._grandTurn = Engine.G.turn;
+      for (const u of [...p.front, ...p.energy]) u.bpMod += 1000;
+      log(`${unit.card.name}: character ทั้งหมดได้ +1000 BP เทิร์นนี้`);
+    },
+    mainLabel: 'จ่าย 1 AP → character ทั้งหมด +1000 BP',
+  };
+
+  // 1-008 GeizRevive Goretsu — at the end of your Attack Phase, pitch 1 and retire itself to bring
+  // a <Kamen Rider GeizRevive Shippu> out of the Outside Area rested.
+  reg['UA29BT-KMR-1-008'] = {
+    async onAttackPhaseEnd(G, p, unit) {
+      if (!p.front.includes(unit) && !p.energy.includes(unit)) return;
+      if (!p.hand.length) return;
+      const si = p.sideline.findIndex(no => /GeizRevive Shippu/i.test(byNo(no)?.name || ''));
+      if (si < 0) return;
+      if (!await confirmR2(p, `${unit.card.name}: ทิ้ง 1 ใบและ retire ตัวเองเพื่อลง GeizRevive Shippu?`)) return;
+      await H.discardFromHand(p);
+      await Engine.sidelineUnit(p, unit, 'effect');
+      const i = p.sideline.findIndex(no => /GeizRevive Shippu/i.test(byNo(no)?.name || ''));
+      if (i >= 0) await Engine.playCardFromZone(p, p.sideline[i], 'sideline', { line: 'front', active: false });
+    },
+  };
+
+  // 1-021 Zero-Two (Izu) — [On Play] give a "Zero-One" character +1000 BP and [Damage (2)].
+  reg['UA29BT-KMR-1-021'] = {
+    async onPlay(G, p, unit) {
+      const t = await pickOwnR2(p, [...p.front, ...p.energy].filter(u => nameHasR(u, 'Zero-One')),
+        `${unit.card.name}: เลือก character "Zero-One"`);
+      if (!t) return;
+      t.bpMod += 1000;
+      t.tempDmg = (t.tempDmg || 0) + 1;
+      log(`${t.card.name}: ได้ +1000 BP และ [Damage (2)] เทิร์นนี้`);
+    },
+  };
+
+  // 1-022 Zero-One Metal Cluster Hopper — [On Play] free-play a cheap yellow character from hand or
+  // Outside Area rested; drawing 1 only when it came from hand.
+  reg['UA29BT-KMR-1-022'] = {
+    async onPlay(G, p, unit) {
+      const fits = c => c && c.type === 'Character' && (c.color || '').toLowerCase() === 'yellow' &&
+        (c.need || 0) <= 1 && (c.ap || 0) === 1;
+      const from = await playFromHandOrOutside(p, fits, { line: 'front', active: false });
+      if (from !== 'hand') return;
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: ลงจากมือ → จั่ว 1 ใบ`);
+    },
+  };
+
+  // 2-069 Decade Complete Form — [When Attacking] rest an active Re-Imagination character for
+  // +3000 BP and a draw on an unblocked hit.
+  reg['EX12BT-KMR-2-069'] = {
+    async onPlay(G, p, unit) {
+      Engine.draw(p, 1);
+      log(`${unit.card.name}: จั่ว 1 ใบ`);
+      if (p.front.length >= 4) return;
+      const i = p.hand.findIndex(no => {
+        const c = byNo(no);
+        return c && c.type === 'Character' && (c.color || '').toLowerCase() === 'green' &&
+          (c.traits || '').includes('Re-Imagination') && (c.ap || 0) === 1;
+      });
+      if (i < 0) return;
+      const no = p.hand[i];
+      await Engine.playCardFromZone(p, no, 'hand', { line: 'front', active: true });
+      const placed = p.front.find(u => u.no === no);
+      if (!placed) return;
+      placed.tempCannotAttack = true;
+      Engine.scheduleDelayedAction(Engine.G.turn + 1, () => { placed.tempCannotAttack = false; });
+      log(`${placed.card.name}: โจมตีไม่ได้เทิร์นนี้`);
+    },
+    async onAttack(G, p, unit) {
+      const cost = p.front.filter(u => u !== unit && !u.rested && (u.card.traits || '').includes('Re-Imagination'));
+      if (!cost.length) return;
+      const c = await pickOwnR2(p, cost, `${unit.card.name}: วางนอน Re-Imagination เพื่อรับ +3000 BP?`);
+      if (!c) return;
+      c.rested = true;
+      unit.bpMod += 3000;
+      unit._grantedUnblockedDraw = true;
+      log(`${unit.card.name}: ได้ +3000 BP และจั่วเมื่อโจมตีไม่ถูกบล็อก เทิร์นนี้`);
+    },
+  };
+
+  // 2-073 Kuuga (DCD) — [Your Turn] +1000 BP and [Impact 1].
+  reg['EX12BT-KMR-2-073'] = {
+    bpBonus(p, unit) { return myTurnR(p) ? 1000 : 0; },
+    impactBonus(p, unit) { return myTurnR(p) ? 1 : 0; },
+  };
 })();

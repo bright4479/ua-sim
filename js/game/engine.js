@@ -90,6 +90,10 @@ const Engine = (() => {
         const traitPrefixed = /^Trait:?\s*/i.test(value);
         if (tok.startsWith('[') || traitPrefixed)
           kw.raidTargets.push({ kind: 'trait', value: value.replace(/^Trait:?\s*/i, '').trim() });
+        // some cards wrap the whole phrase in angle brackets — <Characters with "Zi-O" in their
+        // name> — which would otherwise be taken as a literal card name and match nothing
+        const quoted = value.match(/^Characters? with ["“]([^"”]+)["”] in (?:their|its) name$/i);
+        if (quoted) kw.raidTargets.push({ kind: 'name', value: quoted[1].trim() });
         else kw.raidTargets.push({ kind: 'name', value });
       }
     }
