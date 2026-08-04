@@ -582,18 +582,36 @@ img.thumb { width: 130px; height: auto; aspect-ratio: 63/88; object-fit: cover; 
 .pt-handbar {
   flex-shrink: 0; position: relative; display: flex; align-items: center; gap: 8px;
   padding: 4px 8px 8px; background: var(--red);
+  transition: height .22s ease, padding .22s ease;
 }
-.pt-grip { position: absolute; top: 2px; left: 0; right: 0; display: flex; justify-content: center; cursor: pointer; }
+.pt-grip { position: absolute; top: 2px; left: 0; right: 0; display: flex; justify-content: center; cursor: pointer; z-index: 2; }
 .pt-grip span { width: 42px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.75); }
-/* Exactly 9 cards fit one row; a 10th and beyond scroll sideways rather than wrapping. The column
-   width divides the container itself, so the 8 inter-card gaps are accounted for. */
+/* Cards are sized to the hand actually held (--hand-n, capped at 9) so a 7-card hand fills the row
+   at a readable size instead of shrinking to nine-card slots and leaving dead space. Past 9 the row
+   keeps nine-card sizing and scrolls sideways — it never wraps. */
 .pt-hand {
   flex: 1; min-width: 0; display: grid; grid-auto-flow: column;
-  grid-auto-columns: calc((100% - 32px) / 9); gap: 4px;
+  grid-auto-columns: calc((100% - (var(--hand-n, 9) - 1) * 4px) / var(--hand-n, 9)); gap: 4px;
   overflow-x: auto; overflow-y: hidden; padding: 8px 0 2px; scrollbar-width: none;
+  place-content: center start;
 }
 .pt-hand::-webkit-scrollbar { display: none; }
-.pt-hcard { position: relative; aspect-ratio: 63/88; touch-action: none; cursor: grab; }
+.pt-hcard {
+  position: relative; aspect-ratio: 63/88; touch-action: none; cursor: grab;
+  transition: transform .22s ease;
+}
+
+/* Swiped up: the hand grows in place — it stops just below the side rails rather than covering the
+   screen, the cards zoom up a little and centre, and the draw button and hint step out of the way. */
+.pt-handbar.expanded { height: 208px; align-items: center; padding-bottom: 12px; }
+.pt-handbar.expanded .pt-hand {
+  grid-auto-columns: 104px; place-content: center; padding-top: 12px;
+}
+.pt-handbar.expanded .pt-hcard { animation: pt-zoom .22s ease both; }
+.pt-handbar.expanded .pt-hcost { font-size: .62rem; padding: 1px 5px; }
+.pt-handbar.expanded .pt-draw { display: none; }
+.pt-root:has(.pt-handbar.expanded) .pt-hint { visibility: hidden; }
+@keyframes pt-zoom { from { transform: scale(.82); } to { transform: scale(1); } }
 .pt-hcard img { width: 100%; height: 100%; object-fit: cover; border-radius: 5px; border: 1.5px solid #fff; display: block; }
 .pt-hcost {
   position: absolute; top: 1px; left: 1px; background: rgba(0,0,0,.75); color: #fff;
@@ -613,27 +631,9 @@ img.thumb { width: 130px; height: auto; aspect-ratio: 63/88; object-fit: cover; 
 .pt-draw.pulse { animation: pt-pulse 1.1s ease-in-out infinite; }
 @keyframes pt-pulse { 50% { transform: scale(1.09); box-shadow: 0 0 0 8px rgba(255,255,255,.25); } }
 
-/* --- swipe-up hand drawer --- */
-.pt-drawer {
-  position: absolute; inset: 0; z-index: 120; background: rgba(255,255,255,.98);
-  display: flex; flex-direction: column; transform: translateY(100%);
-  transition: transform .24s ease; border-top: var(--frame);
-}
-.pt-drawer.open { transform: translateY(0); }
-.pt-drawer-head {
-  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-  border-bottom: 2px solid #f0d8d6; color: var(--red);
-}
-.pt-drawer-head b { flex: 1; }
-.pt-drawer-cards {
-  flex: 1; display: flex; gap: 8px; overflow-x: auto; align-items: center; padding: 12px;
-}
-.pt-dcard { flex: 0 0 auto; width: 40vw; max-width: 220px; cursor: pointer; text-align: center; }
-.pt-dcard img { width: 100%; border-radius: 8px; border: 2px solid var(--red); display: block; }
-.pt-dcard span { display: block; font-size: .66rem; margin-top: 4px; color: var(--ink); }
-
 @media (prefers-reduced-motion: reduce) {
-  .pt-drawer { transition: none; }
+  .pt-handbar, .pt-hcard { transition: none; }
+  .pt-handbar.expanded .pt-hcard { animation: none; }
   .pt-draw.pulse { animation: none; }
 }
 

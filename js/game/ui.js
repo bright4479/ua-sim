@@ -438,7 +438,7 @@ const GameUI = (() => {
 
         <div class="pt-hint">${hintText()}</div>
 
-        <div class="pt-handbar">
+        <div class="pt-handbar" id="pt-handbar" style="--hand-n:${Math.min(Math.max(me.hand.length, 1), 9)}">
           <div class="pt-grip" id="pt-grip"><span></span></div>
           <div class="pt-hand" id="pt-hand">
             ${me.hand.map((no, i) => {
@@ -448,20 +448,6 @@ const GameUI = (() => {
             }).join('')}
           </div>
           <button class="pt-draw ${myTurn && pendingKind === 'extradraw' ? 'pulse' : ''}" id="pt-draw">จั่ว</button>
-        </div>
-
-        <div class="pt-drawer" id="pt-drawer">
-          <div class="pt-drawer-head">
-            <b>การ์ดในมือ (${me.hand.length})</b>
-            <button class="pt-icon" id="pt-drawer-close">✕</button>
-          </div>
-          <div class="pt-drawer-cards">
-            ${me.hand.map(no => {
-              const c = UAData.byNo.get(no);
-              return `<div class="pt-dcard" data-no="${no}">${UAData.imgTag(c)}
-                <span>${UAData.escapeHtml(c.name)}</span></div>`;
-            }).join('')}
-          </div>
         </div>
 
         <div id="gb-log" class="gb-log hidden">
@@ -503,20 +489,18 @@ const GameUI = (() => {
       el.addEventListener('click', () => onUnitClick(parseInt(el.dataset.uid), el.dataset.mine === '1'));
     });
 
-    // hand drawer — swipe up on the grip, or tap it
-    const drawer = document.getElementById('pt-drawer');
-    const openDrawer = () => drawer?.classList.add('open');
-    document.getElementById('pt-grip')?.addEventListener('click', openDrawer);
-    document.getElementById('pt-drawer-close')?.addEventListener('click', () => drawer?.classList.remove('open'));
-    document.querySelectorAll('.pt-dcard').forEach(el => {
-      el.addEventListener('click', () => showCardModal(el.dataset.no));
-    });
+    // Swiping up enlarges the hand in place rather than opening a separate screen, so the very same
+    // card elements stay draggable — sliding one down onto a line still plays it.
+    const bar = document.getElementById('pt-handbar');
+    document.getElementById('pt-grip')?.addEventListener('click', () => bar?.classList.toggle('expanded'));
 
     let swipeY = null;
-    const bar = document.querySelector('.pt-handbar');
     bar?.addEventListener('touchstart', e => { swipeY = e.touches[0].clientY; }, { passive: true });
     bar?.addEventListener('touchmove', e => {
-      if (swipeY != null && swipeY - e.touches[0].clientY > 40) { openDrawer(); swipeY = null; }
+      if (swipeY == null) return;
+      const dy = swipeY - e.touches[0].clientY;
+      if (dy > 40) { bar.classList.add('expanded'); swipeY = null; }
+      else if (dy < -40) { bar.classList.remove('expanded'); swipeY = null; }
     }, { passive: true });
     bar?.addEventListener('touchend', () => { swipeY = null; });
 
@@ -550,6 +534,8 @@ const GameUI = (() => {
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < 10) return;
         if (pendingKind !== 'main') return;                    // only placeable during Main Phase
         dragging = true;
+        // collapse the enlarged hand so the lines underneath become visible drop targets
+        document.getElementById('pt-handbar')?.classList.remove('expanded');
         ghost = el.cloneNode(true);
         ghost.className = 'pt-ghost';
         document.body.appendChild(ghost);
