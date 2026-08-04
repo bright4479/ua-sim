@@ -344,6 +344,234 @@ const GameUI = (() => {
   const PHASES = [['Main', 'Main Phase'], ['Attack', 'Attack Phase'], ['End', 'End Phase']];
 
   // ---------- main render ----------
+  // ══════════ portrait (phone) board ══════════
+  // A phone held upright gets a purpose-built vertical layout rather than a squeezed copy of the
+  // desktop mat: both players' lines stack down the middle, the phase button sits between them,
+  // and the hand runs along the bottom. Same engine, same controller — only the view differs.
+  const isPortrait = () => window.innerHeight > window.innerWidth;
+
+  function ptSlotHtml(u, mine, owner) {
+    if (!u) return '<div class="pt-slot"></div>';
+    const bp = u.card.bp != null ? Engine.bp(u) : '';
+    const mod = (u.bpMod || u.bpPersist) ? `<span class="bpmod">${(u.bpMod + u.bpPersist) > 0 ? '+' : ''}${u.bpMod + u.bpPersist}</span>` : '';
+    return `<div class="pt-slot filled">
+      <div class="pt-unit ${u.rested ? 'rested' : ''} ${mine ? 'mine' : 'foe'}"
+           data-uid="${u.uid}" data-no="${u.no}" data-mine="${mine ? 1 : 0}">
+        ${UAData.imgTag(u.card)}
+        ${keywordBadges(u, owner)}
+        ${bp !== '' ? `<div class="pt-bp">${bp}${mod}</div>` : ''}
+      </div></div>`;
+  }
+
+  function ptLineHtml(p, mine, line, owner) {
+    const arr = line === 'front' ? p.front : p.energy;
+    let s = '';
+    for (let i = 0; i < 4; i++) s += ptSlotHtml(arr[i], mine, owner);
+    return `<div class="pt-line ${line} ${mine ? 'me' : 'foe'}" data-owner="${mine ? 'me' : 'foe'}" data-line="${line}">
+      <span class="pt-line-tag">${line === 'front' ? 'FRONT' : 'ENERGY'}</span>${s}</div>`;
+  }
+
+  function ptPile(p, mine, zone, label) {
+    return `<button class="pt-pile" data-owner="${mine ? 'me' : 'foe'}" data-zone="${zone}">
+      <span class="pt-pile-n">${p[zone].length}</span><span class="pt-pile-l">${label}</span></button>`;
+  }
+
+  function ptPhaseLabel(myTurn) {
+    if (!myTurn) return { main: 'เทิร์นบอท', sub: Engine.G.phase };
+    const map = {
+      extradraw: { main: 'ข้ามจั่วเพิ่ม', sub: 'Draw Phase' },
+      movement: { main: 'ไป Main Phase', sub: 'Move Phase' },
+      main: { main: 'ไป Attack Phase', sub: 'Main Phase' },
+      attack: { main: 'จบเทิร์น', sub: 'Attack Phase' },
+    };
+    return map[pendingKind] || { main: '…', sub: Engine.G.phase };
+  }
+
+  function renderPortrait() {
+    const G = Engine.G;
+    const me = G.players[0], foe = G.players[1];
+    const el = root();
+    const myTurn = G.players[G.active] === me;
+    const ph = ptPhaseLabel(myTurn);
+    const maxLife = me.lifeMax || Math.max(me.life.length, 7);
+
+    el.innerHTML = `
+      <div class="pt-root">
+        <div class="pt-top">
+          <div class="pt-life">LIFE <b>${me.life.length}/${maxLife}</b></div>
+          <div class="pt-ap">${[0, 1, 2].map(i => {
+            const exists = i < me.apTotal;
+            const rested = exists && i >= me.apTotal - me.apRested;
+            return `<span class="pt-apdot ${exists ? '' : 'empty'} ${rested ? 'rested' : ''}"></span>`;
+          }).join('')}<em>AP</em></div>
+          <div class="pt-top-right">
+            <button class="pt-icon" id="pt-log-btn">📜</button>
+            <button class="pt-icon danger" id="pt-quit">ออก</button>
+          </div>
+        </div>
+
+        <div class="pt-board">
+          <div class="pt-rail left">
+            <div class="pt-foe-name">🤖 ${UAData.escapeHtml(foe.name)}</div>
+            ${ptPile(foe, false, 'removal', 'RM')}
+            <div class="pt-spacer"></div>
+            ${ptPile(me, true, 'removal', 'RM')}
+          </div>
+
+          <div class="pt-rows">
+            ${ptLineHtml(foe, false, 'front', foe)}
+            ${ptLineHtml(foe, false, 'energy', foe)}
+            <button class="pt-phase ${myTurn && pendingKind ? '' : 'idle'}" id="pt-phase">
+              <b>${ph.main}</b><span>${ph.sub}</span></button>
+            ${ptLineHtml(me, true, 'energy', me)}
+            ${ptLineHtml(me, true, 'front', me)}
+          </div>
+
+          <div class="pt-rail right">
+            <div class="pt-deck" data-owner="foe">${foe.deck.length}<em>เด็คบอท</em></div>
+            ${ptPile(foe, false, 'sideline', 'SL')}
+            <div class="pt-spacer"></div>
+            ${ptPile(me, true, 'sideline', 'SL')}
+            <div class="pt-deck" data-owner="me">${me.deck.length}<em>เด็ค</em></div>
+          </div>
+        </div>
+
+        <div class="pt-hint">${hintText()}</div>
+
+        <div class="pt-handbar">
+          <div class="pt-grip" id="pt-grip"><span></span></div>
+          <div class="pt-hand" id="pt-hand">
+            ${me.hand.map((no, i) => {
+              const c = UAData.byNo.get(no);
+              return `<div class="pt-hcard" data-i="${i}" data-no="${no}">
+                ${UAData.imgTag(c)}<div class="pt-hcost">${c.need ?? ''}·${c.ap ?? 0}AP</div></div>`;
+            }).join('')}
+          </div>
+          <button class="pt-draw ${myTurn && pendingKind === 'extradraw' ? 'pulse' : ''}" id="pt-draw">จั่ว</button>
+        </div>
+
+        <div class="pt-drawer" id="pt-drawer">
+          <div class="pt-drawer-head">
+            <b>การ์ดในมือ (${me.hand.length})</b>
+            <button class="pt-icon" id="pt-drawer-close">✕</button>
+          </div>
+          <div class="pt-drawer-cards">
+            ${me.hand.map(no => {
+              const c = UAData.byNo.get(no);
+              return `<div class="pt-dcard" data-no="${no}">${UAData.imgTag(c)}
+                <span>${UAData.escapeHtml(c.name)}</span></div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <div id="gb-log" class="gb-log hidden">
+          ${G.log.slice(-100).map(l => `<div>${UAData.escapeHtml(l)}</div>`).join('')}
+        </div>
+
+        ${G.over ? `<div class="gb-over"><div class="gb-over-box">
+            <h2>${G.winner === me ? '🏆 คุณชนะ!' : '💀 คุณแพ้'}</h2>
+            <button class="btn primary" onclick="App.show('menu')">กลับเมนู</button>
+          </div></div>` : ''}
+      </div>`;
+    bindPortraitEvents();
+  }
+
+  function bindPortraitEvents() {
+    const G = Engine.G;
+    const me = G.players[0], foe = G.players[1];
+
+    document.getElementById('pt-phase')?.addEventListener('click', () => {
+      if (pendingKind === 'main') resolve({ type: 'done' });
+      else if (pendingKind === 'attack') resolve(null);
+      else if (pendingKind === 'movement') resolve(movesBuffer);
+      else if (pendingKind === 'extradraw') resolve(false);
+    });
+    document.getElementById('pt-draw')?.addEventListener('click', () => {
+      if (pendingKind === 'extradraw') resolve(true);
+      else DeckBuilder.toast('จั่วเพิ่มได้เฉพาะช่วง Draw Phase');
+    });
+    document.getElementById('pt-quit')?.addEventListener('click', () => {
+      if (confirm('ออกจากเกม?')) { Engine.G.over = true; App.show('menu'); }
+    });
+    document.getElementById('pt-log-btn')?.addEventListener('click', () => {
+      document.getElementById('gb-log').classList.toggle('hidden');
+    });
+    document.querySelectorAll('.pt-pile').forEach(el => {
+      el.addEventListener('click', () => openPileViewer(el.dataset.owner === 'me' ? me : foe, el.dataset.zone));
+    });
+    document.querySelectorAll('.pt-unit').forEach(el => {
+      el.addEventListener('click', () => onUnitClick(parseInt(el.dataset.uid), el.dataset.mine === '1'));
+    });
+
+    // hand drawer — swipe up on the grip, or tap it
+    const drawer = document.getElementById('pt-drawer');
+    const openDrawer = () => drawer?.classList.add('open');
+    document.getElementById('pt-grip')?.addEventListener('click', openDrawer);
+    document.getElementById('pt-drawer-close')?.addEventListener('click', () => drawer?.classList.remove('open'));
+    document.querySelectorAll('.pt-dcard').forEach(el => {
+      el.addEventListener('click', () => showCardModal(el.dataset.no));
+    });
+
+    let swipeY = null;
+    const bar = document.querySelector('.pt-handbar');
+    bar?.addEventListener('touchstart', e => { swipeY = e.touches[0].clientY; }, { passive: true });
+    bar?.addEventListener('touchmove', e => {
+      if (swipeY != null && swipeY - e.touches[0].clientY > 40) { openDrawer(); swipeY = null; }
+    }, { passive: true });
+    bar?.addEventListener('touchend', () => { swipeY = null; });
+
+    document.querySelectorAll('.pt-hcard').forEach(el => attachPortraitDrag(el));
+  }
+
+  // Drag a hand card onto a line. The gesture starts as soon as the finger moves — no long press —
+  // and a tap that never moves opens the card's detail instead.
+  function attachPortraitDrag(el) {
+    const no = el.dataset.no;
+    let ghost = null, startX = 0, startY = 0, dragging = false, pid = null;
+
+    const cleanup = () => {
+      ghost?.remove(); ghost = null; dragging = false; pid = null;
+      document.querySelectorAll('.pt-line.drop').forEach(z => z.classList.remove('drop'));
+    };
+    const lineUnder = (x, y) => {
+      const hit = document.elementFromPoint(x, y)?.closest('.pt-line[data-owner="me"]');
+      return hit ? hit.dataset.line : null;
+    };
+
+    el.addEventListener('pointerdown', e => {
+      if (e.button != null && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY; pid = e.pointerId;
+      el.setPointerCapture?.(pid);
+    });
+
+    el.addEventListener('pointermove', e => {
+      if (pid == null) return;
+      if (!dragging) {
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 10) return;
+        if (pendingKind !== 'main') return;                    // only placeable during Main Phase
+        dragging = true;
+        ghost = el.cloneNode(true);
+        ghost.className = 'pt-ghost';
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = `${e.clientX}px`;
+      ghost.style.top = `${e.clientY}px`;
+      const line = lineUnder(e.clientX, e.clientY);
+      document.querySelectorAll('.pt-line.drop').forEach(z => z.classList.remove('drop'));
+      if (line) document.querySelector(`.pt-line[data-owner="me"][data-line="${line}"]`)?.classList.add('drop');
+    });
+
+    el.addEventListener('pointerup', async e => {
+      if (pid == null) return;
+      const wasDragging = dragging;
+      const line = wasDragging ? lineUnder(e.clientX, e.clientY) : null;
+      cleanup();
+      if (!wasDragging) { showCardModal(no); return; }         // a tap inspects the card
+      if (line) await playHandCardToLine(no, line);
+    });
+    el.addEventListener('pointercancel', cleanup);
+  }
+
   function render() {
     const G = Engine.G;
     if (!G.players.length) return;
@@ -352,6 +580,7 @@ const GameUI = (() => {
     if (!el) return;
     const myTurn = G.players[G.active] === me;
     maybeShowPhaseBanner();
+    if (isPortrait()) { renderPortrait(); return; }
 
     el.innerHTML = `
       <div class="gb-top">
@@ -495,28 +724,32 @@ const GameUI = (() => {
     try { return JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return null; }
   }
 
+  // shared by the desktop drop handler and the portrait drag-to-place gesture
+  async function playHandCardToLine(no, line) {
+    if (pendingKind !== 'main') return;
+    const me = Engine.G.players[0];
+    const c = UAData.byNo.get(no);
+    if (!c) return;
+    if (c.type === 'Event') { resolve({ type: 'event', no }); return; }
+    if (c.type === 'Field' && line !== 'energy') { DeckBuilder.toast('Site ลงได้เฉพาะ Energy Line'); return; }
+    if (c.type !== 'Character' && c.type !== 'Field') { DeckBuilder.toast('การ์ดนี้ลงสนามไม่ได้'); return; }
+    const dest = line === 'front' ? me.front : me.energy;
+    let removeUid = null;
+    if (dest.length >= 4) {
+      removeUid = await modalChoice('Line เต็ม — เลือกใบที่จะส่งไป Removal', '',
+        [...dest.map(u => ({ label: u.card.name, value: u.uid })), { label: 'ยกเลิก', value: null }]);
+      if (removeUid == null) return;
+    }
+    resolve({ type: 'play', no, line, removeUid });
+  }
+
   async function onDropOnLine(e, line) {
     e.preventDefault();
     const d = readDrag(e);
     if (!d) return;
     const me = Engine.G.players[0];
 
-    if (d.kind === 'hand' && pendingKind === 'main') {
-      const c = UAData.byNo.get(d.no);
-      if (!c) return;
-      if (c.type === 'Event') { resolve({ type: 'event', no: d.no }); return; }
-      if (c.type === 'Field' && line !== 'energy') { DeckBuilder.toast('Site ลงได้เฉพาะ Energy Line'); return; }
-      if (c.type !== 'Character' && c.type !== 'Field') { DeckBuilder.toast('การ์ดนี้ลงสนามไม่ได้'); return; }
-      const dest = line === 'front' ? me.front : me.energy;
-      let removeUid = null;
-      if (dest.length >= 4) {
-        removeUid = await modalChoice('Line เต็ม — เลือกใบที่จะส่งไป Removal', '',
-          [...dest.map(u => ({ label: u.card.name, value: u.uid })), { label: 'ยกเลิก', value: null }]);
-        if (removeUid == null) return;
-      }
-      resolve({ type: 'play', no: d.no, line, removeUid });
-      return;
-    }
+    if (d.kind === 'hand' && pendingKind === 'main') { await playHandCardToLine(d.no, line); return; }
 
     if (d.kind === 'unit' && pendingKind === 'movement') {
       const u = Engine.findUnit(me, d.uid);
@@ -756,8 +989,14 @@ const GameUI = (() => {
     el.style.setProperty('--stage-h', STAGE_H + 'px');
     el.style.setProperty('--stage-scale', Math.min(vw / w, vh / STAGE_H).toFixed(4));
   }
-  addEventListener('resize', fitStage);
-  addEventListener('orientationchange', () => setTimeout(fitStage, 120));
+  // rotating swaps between the landscape mat and the portrait board, so re-render too
+  let lastPortrait = isPortrait();
+  const onViewportChange = () => {
+    fitStage();
+    if (isPortrait() !== lastPortrait) { lastPortrait = isPortrait(); if (Engine.G.players.length) render(); }
+  };
+  addEventListener('resize', onViewportChange);
+  addEventListener('orientationchange', () => setTimeout(onViewportChange, 120));
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', fitStage);
   else fitStage();
 

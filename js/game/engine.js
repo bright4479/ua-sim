@@ -565,7 +565,7 @@ const Engine = (() => {
       }
     }
     // life 7
-    for (const p of G.players) p.life = p.deck.splice(0, 7);
+    for (const p of G.players) { p.life = p.deck.splice(0, 7); p.lifeMax = p.life.length; }
     log('เกมเริ่ม! ' + G.players[0].name + ' เล่นก่อน');
     update();
     await runTurn();
