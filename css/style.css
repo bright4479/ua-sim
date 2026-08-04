@@ -596,8 +596,10 @@ img.thumb { width: 130px; height: auto; aspect-ratio: 63/88; object-fit: cover; 
   place-content: center start;
 }
 .pt-hand::-webkit-scrollbar { display: none; }
+/* pan-x hands horizontal swipes to the browser so the row still scrolls, while vertical drags stay
+   with us for the drag-to-play gesture (touch-action:none would have blocked scrolling entirely) */
 .pt-hcard {
-  position: relative; aspect-ratio: 63/88; touch-action: none; cursor: grab;
+  position: relative; aspect-ratio: 63/88; touch-action: pan-x; cursor: grab;
   transition: transform .22s ease;
 }
 
@@ -630,6 +632,25 @@ img.thumb { width: 130px; height: auto; aspect-ratio: 63/88; object-fit: cover; 
 }
 .pt-draw.pulse { animation: pt-pulse 1.1s ease-in-out infinite; }
 @keyframes pt-pulse { 50% { transform: scale(1.09); box-shadow: 0 0 0 8px rgba(255,255,255,.25); } }
+
+/* --- card detail on a phone ---
+   One fixed box for every card, so a long effect does not produce a taller dialog than a short one.
+   The art sits on top and the text below, which removes the side-by-side layout that forced
+   horizontal scrolling on a narrow screen; a long effect scrolls vertically inside the box. */
+@media (orientation: portrait) {
+  #card-modal .modal-card {
+    flex-direction: column; gap: 10px; padding: 12px;
+    width: min(92vw, 400px); height: min(86vh, 660px);
+    max-width: none; max-height: none; overflow: hidden;
+  }
+  #card-modal #cm-img { height: auto; width: min(50vw, 200px); align-self: center; flex-shrink: 0; }
+  #card-modal .modal-info {
+    min-width: 0; max-width: none; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  }
+  #card-modal .modal-info table { table-layout: fixed; width: 100%; }
+  #card-modal .modal-info td { word-break: break-word; }
+  #card-modal .modal-info td:first-child { width: 40%; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .pt-handbar, .pt-hcard { transition: none; }

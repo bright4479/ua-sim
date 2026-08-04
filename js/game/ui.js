@@ -531,7 +531,9 @@ const GameUI = (() => {
     el.addEventListener('pointermove', e => {
       if (pid == null) return;
       if (!dragging) {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 10) return;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        // a mostly-sideways swipe is the player scrolling the row, not picking a card up
+        if (Math.abs(dy) < 12 || Math.abs(dx) > Math.abs(dy)) return;
         if (pendingKind !== 'main') return;                    // only placeable during Main Phase
         dragging = true;
         // collapse the enlarged hand so the lines underneath become visible drop targets
