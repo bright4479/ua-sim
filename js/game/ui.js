@@ -419,12 +419,13 @@ const GameUI = (() => {
           </div>
 
           <div class="pt-rows">
-            ${ptLineHtml(foe, false, 'front', foe)}
+            <!-- Energy sits behind each player and Front faces the middle, matching the desktop mat -->
             ${ptLineHtml(foe, false, 'energy', foe)}
+            ${ptLineHtml(foe, false, 'front', foe)}
             <button class="pt-phase ${myTurn && pendingKind ? '' : 'idle'}" id="pt-phase">
               <b>${ph.main}</b><span>${ph.sub}</span></button>
-            ${ptLineHtml(me, true, 'energy', me)}
             ${ptLineHtml(me, true, 'front', me)}
+            ${ptLineHtml(me, true, 'energy', me)}
           </div>
 
           <div class="pt-rail right">
